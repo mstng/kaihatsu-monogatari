@@ -1,0 +1,11 @@
+{
+  "name": "kaihatsu",
+  "version": "0.1.0",
+  "private": true,
+  "description": "開発会社をつくる。案件をつくってリリースし、評価をもらう経営シミュレーション。",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "serve": "node tools/serve.js"
+  }
+}

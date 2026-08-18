@@ -17,10 +17,11 @@ import {
   progress,
   review,
   affinityHint,
-  findStaff,
   findGenre,
   findTech,
+  createStaff,
 } from './dev.js';
+import { grow, expToNext, findSkill, MAX_LEVEL } from './company.js';
 
 // --- 演出のつまみ（手触りはここで変わる） ---
 
@@ -46,10 +47,23 @@ const el = {
   resultSales: document.getElementById('result-sales'),
   reviews: document.getElementById('reviews'),
   affinityHint: document.getElementById('affinity-hint'),
+  growth: document.getElementById('growth'),
   again: document.getElementById('again'),
 };
 
 const MAX_STAFF = 3;
+
+/**
+ * 会社。案件をまたいで残るのはここだけ。
+ * 社員はここで育ち、次の案件に育った状態で出ていく。
+ *
+ * まだ保存はしていない（リロードで最初から）。段階3で扱う。
+ */
+let company = {
+  staff: STAFF_POOL.map((s) => createStaff(s.id)),
+  seed: (Date.now() % 2147483647) >>> 0,
+  projects: 0,
+};
 
 let picked = { genreId: null, techId: null, staffIds: [] };
 let state = null;
@@ -81,15 +95,30 @@ function renderChoices() {
   }
 
   el.staffChoices.innerHTML = '';
-  for (const staff of STAFF_POOL) {
+  for (const staff of company.staff) {
     const on = picked.staffIds.includes(staff.id);
-    el.staffChoices.appendChild(
-      choiceButton(staff.emoji, staff.name, staff.role, on, () => {
-        if (on) picked.staffIds = picked.staffIds.filter((id) => id !== staff.id);
-        else if (picked.staffIds.length < MAX_STAFF) picked.staffIds.push(staff.id);
-        renderChoices();
-      }),
-    );
+    const button = choiceButton(staff.emoji, staff.name, staff.role, on, () => {
+      if (on) picked.staffIds = picked.staffIds.filter((id) => id !== staff.id);
+      else if (picked.staffIds.length < MAX_STAFF) picked.staffIds.push(staff.id);
+      renderChoices();
+    });
+
+    // 育った実感が選択画面に出ていないと、育成が「起きたこと」で終わってしまう。
+    // 誰を入れるかの判断材料にもなる
+    const level = document.createElement('span');
+    level.className = 'choice-level';
+    level.textContent = `Lv.${staff.level}`;
+    button.appendChild(level);
+
+    if (staff.skills.length > 0) {
+      const skills = document.createElement('span');
+      skills.className = 'choice-skills';
+      skills.textContent = staff.skills.map((id) => findSkill(id)?.emoji ?? '').join('');
+      skills.title = staff.skills.map((id) => findSkill(id)?.name ?? '').join(' / ');
+      button.appendChild(skills);
+    }
+
+    el.staffChoices.appendChild(button);
   }
 
   el.staffLabel.textContent = `だれにやってもらう？（${picked.staffIds.length} / ${MAX_STAFF}人）`;
@@ -117,9 +146,8 @@ function buildStage() {
   el.stage.innerHTML = '';
   deskOf.clear();
 
-  const count = state.staffIds.length;
-  state.staffIds.forEach((staffId, index) => {
-    const staff = findStaff(staffId);
+  const count = state.staff.length;
+  state.staff.forEach((staff, index) => {
     const desk = document.createElement('div');
     desk.className = 'desk';
     // 人数に応じて均等に並べる
@@ -137,7 +165,7 @@ function buildStage() {
 
     desk.append(emoji, name);
     el.stage.appendChild(desk);
-    deskOf.set(staffId, { left, emoji });
+    deskOf.set(staff.id, { left, emoji });
   });
 }
 
@@ -181,7 +209,9 @@ function popNumber(entry) {
 
 function startDevelopment() {
   const seed = (Date.now() % 2147483647) >>> 0;
-  state = startProject(picked, seed);
+  // ID ではなく実体を渡す。育ったレベルとスキルを work() が見るため
+  const staff = picked.staffIds.map((id) => company.staff.find((s) => s.id === id));
+  state = startProject({ genreId: picked.genreId, techId: picked.techId, staff }, seed);
 
   el.setup.hidden = true;
   el.result.hidden = true;
@@ -232,8 +262,90 @@ function showResult() {
   // 相性は数値では見せない。次に活きる「気づき」として言葉で返す
   el.affinityHint.textContent = affinityHint(result.affinity);
 
+  applyGrowth();
+
   el.develop.hidden = true;
   el.result.hidden = false;
+}
+
+/**
+ * 案件の成果を社員に反映して、その様子を出す。
+ *
+ * ここがカイロソフト系のごほうび。
+ * 1件ずつ順に浮かび上がらせるのは、まとめて出すと「育った」感じが流れるため。
+ */
+function applyGrowth() {
+  const result = grow(company.staff, state.contribution, company.seed);
+  company = { ...company, staff: result.staff, seed: result.seed, projects: company.projects + 1 };
+
+  // 社員ごとに、起きたことをまとめる
+  const byStaff = new Map();
+  for (const event of result.events) {
+    if (!byStaff.has(event.staffId)) {
+      byStaff.set(event.staffId, { exp: 0, levels: [], skills: [] });
+    }
+    const entry = byStaff.get(event.staffId);
+    if (event.type === 'exp') entry.exp += event.amount;
+    if (event.type === 'levelup') entry.levels.push(event.level);
+    if (event.type === 'skill') entry.skills.push(event.skill);
+  }
+
+  el.growth.innerHTML = '';
+  let index = 0;
+  for (const [staffId, entry] of byStaff) {
+    const staff = company.staff.find((s) => s.id === staffId);
+    const leveledUp = entry.levels.length > 0;
+
+    const row = document.createElement('div');
+    row.className = `grow-row${leveledUp ? ' levelup' : ''}`;
+    // 少しずつ遅らせて、上から順に出てくるように見せる
+    row.style.animationDelay = `${index * 0.12}s`;
+
+    const emoji = document.createElement('span');
+    emoji.className = 'grow-emoji';
+    emoji.textContent = staff.emoji;
+
+    const body = document.createElement('div');
+    body.className = 'grow-body';
+
+    const name = document.createElement('span');
+    name.className = 'grow-name';
+    name.textContent = staff.name;
+
+    const exp = document.createElement('span');
+    exp.className = 'grow-exp';
+    const need = expToNext(staff.level);
+    exp.textContent =
+      staff.level >= MAX_LEVEL
+        ? `+${entry.exp} 経験値 ・ これ以上は育たない`
+        : `+${entry.exp} 経験値 ・ つぎまで ${Math.max(0, need - staff.exp)}`;
+
+    const track = document.createElement('div');
+    track.className = 'grow-track';
+    const fill = document.createElement('div');
+    fill.className = 'grow-fill';
+    fill.style.width = `${staff.level >= MAX_LEVEL ? 100 : Math.min(100, (staff.exp / need) * 100)}%`;
+    track.appendChild(fill);
+
+    body.append(name, exp, track);
+
+    for (const skill of entry.skills) {
+      const learned = document.createElement('span');
+      learned.className = 'grow-skill';
+      learned.textContent = `${skill.emoji} ${skill.name} をおぼえた！ ${skill.describe}`;
+      body.appendChild(learned);
+    }
+
+    const level = document.createElement('span');
+    level.className = 'grow-level';
+    level.textContent = leveledUp
+      ? `Lv.${staff.level} ↑`
+      : `Lv.${staff.level}`;
+
+    row.append(emoji, body, level);
+    el.growth.appendChild(row);
+    index++;
+  }
 }
 
 // --- 操作 ---

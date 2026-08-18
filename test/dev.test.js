@@ -21,9 +21,13 @@ import {
   affinityOf,
   affinityHint,
   findStaff,
+  createStaff,
 } from '../src/dev.js';
 
-const SETUP = { genreId: 'gyomu', techId: 'java', staffIds: ['tanaka', 'sato', 'suzuki'] };
+/** 社員の実体を作る。startProject は ID ではなく実体を受け取る（レベルとスキルを見るため） */
+const team = (...ids) => ids.map(createStaff);
+
+const SETUP = { genreId: 'gyomu', techId: 'java', staff: team('tanaka', 'sato', 'suzuki') };
 
 /** 完成まで回す */
 function playThrough(setup, seed) {
@@ -123,7 +127,7 @@ test('作業結果には、誰がどの指標を伸ばしたかが入ってい�
 });
 
 test('担当した社員しか作業しない', () => {
-  let state = startProject({ ...SETUP, staffIds: ['tanaka'] }, 41);
+  let state = startProject({ ...SETUP, staff: team('tanaka') }, 41);
   for (let i = 0; i < WORK_COUNT; i++) {
     state = work(state);
     assert.equal(state.lastWork.staffId, 'tanaka');
@@ -153,7 +157,7 @@ test('相性が良い組み合わせのほうが、はっきり高い数字に�
 
 test('得意分野を持つ社員は、その指標がいちばん伸びやすい', () => {
   // 佐藤（デザイン得意）だけで作らせる
-  let state = startProject({ ...SETUP, staffIds: ['sato'] }, 61);
+  let state = startProject({ ...SETUP, staff: team('sato') }, 61);
   while (!state.done) state = work(state);
   const top = STATS.reduce((best, s) => (state.stats[s.key] > state.stats[best.key] ? s : best));
   assert.equal(top.key, 'design');

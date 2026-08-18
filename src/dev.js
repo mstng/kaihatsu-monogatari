@@ -10,6 +10,7 @@
 //   当たりを引くと数字が跳ねる。それを覚えて次に活かすのがリプレイの動機になる。
 
 import { nextRandom, randomInt, pickWeighted } from './rng.js';
+import { skillEffects, levelMultiplier } from './company.js';
 
 // --- チューニング定数 ---
 
@@ -115,6 +116,16 @@ export const STAFF_POOL = [
   },
 ];
 
+/**
+ * 社員を1人つくる。レベル1・経験値0・スキルなしから始まる。
+ * STAFF_POOL は定義（素質）で、こちらが実体。育つのは実体のほう。
+ */
+export function createStaff(id) {
+  const def = STAFF_POOL.find((s) => s.id === id);
+  if (!def) return null;
+  return { ...def, level: 1, exp: 0, skills: [] };
+}
+
 export function findStaff(id) {
   return STAFF_POOL.find((s) => s.id === id);
 }
@@ -138,13 +149,17 @@ export function affinityOf(genreId, techId) {
  * 開発を開始した状態を作る。
  * 同じ種・同じ選択なら必ず同じ結果になる（やり直しで結果が変わらない）。
  */
-export function startProject({ genreId, techId, staffIds }, seed) {
+export function startProject({ genreId, techId, staff }, seed) {
   return {
     seed: seed >>> 0,
     initialSeed: seed >>> 0,
     genreId,
     techId,
-    staffIds: [...staffIds],
+    // 社員は「実体」を受け取る。レベルやスキルを work() が見るため、
+    // IDだけ渡す形だと成長が結果に反映されない
+    staff: staff.map((s) => ({ ...s })),
+    // 誰がどれだけ数字を出したか。案件のあと、これが経験値になる
+    contribution: Object.fromEntries(staff.map((s) => [s.id, 0])),
     // 4指標の積み上げ
     stats: Object.fromEntries(STATS.map((s) => [s.key, 0])),
     // 何回作業したか
@@ -169,25 +184,32 @@ export function work(state) {
   let s = state.seed;
 
   // 誰が動くか
-  const staffRoll = randomInt(s, state.staffIds.length);
+  const staffRoll = randomInt(s, state.staff.length);
   s = staffRoll.seed;
-  const staff = findStaff(state.staffIds[staffRoll.value]);
+  const staff = state.staff[staffRoll.value];
+  const skills = skillEffects(staff);
 
-  // その人がどの指標に手を伸ばすか（bias の重みで抽選）
+  // その人がどの指標に手を伸ばすか（bias の重みで抽選）。
+  // スキルはこの「手の伸びやすさ」を押し上げる形で効かせる。
+  // 数字そのものを増やすより、その人らしさが出る
   const statRoll = pickWeighted(
     s,
-    STATS.map((stat) => ({ weight: staff.bias[stat.key], value: stat })),
+    STATS.map((stat) => ({
+      weight: staff.bias[stat.key] + (skills.biasBoost[stat.key] ?? 0),
+      value: stat,
+    })),
   );
   s = statRoll.seed;
   const stat = statRoll.value;
 
-  // 数字を決める。ゆらぎ ×（得意なら加算）×（相性）
+  // 数字を決める。ゆらぎ ＋スキル ×（得意）×（レベル）×（相性）
   const wobble = nextRandom(s);
   s = wobble.seed;
 
   const affinity = affinityOf(state.genreId, state.techId);
-  let gain = BASE_GAIN + Math.floor(wobble.value * 4); // 3〜6
+  let gain = BASE_GAIN + Math.floor(wobble.value * 4) + skills.flatGain; // 3〜6 ＋スキル
   if (staff.specialty === stat.key) gain = Math.round(gain * SPECIALTY_BONUS);
+  gain = Math.round(gain * levelMultiplier(staff));
   gain = Math.round(gain * AFFINITY_BONUS[affinity]);
 
   // 相性が良いほど、大きい数字が出る回数が増える。
@@ -195,7 +217,9 @@ export function work(state) {
   //
   // great だけに出していたときは、倍率とクリティカルが二重にかかって
   // 合計が振り切れた。good にも出して、跳ね幅自体は控えめにしてある。
-  const critical = (affinity === 'great' || affinity === 'good') && wobble.value > 0.8;
+  // スキル「深夜のひらめき」は、相性に関係なく跳ねる目を足す
+  const baseCrit = affinity === 'great' || affinity === 'good' ? 0.2 : 0;
+  const critical = wobble.value > 1 - (baseCrit + skills.critChance);
   if (critical) gain = Math.round(gain * 1.5);
 
   const worked = state.worked + 1;
@@ -204,6 +228,11 @@ export function work(state) {
     ...state,
     seed: s,
     stats: { ...state.stats, [stat.key]: state.stats[stat.key] + gain },
+    // 誰がどれだけ出したかを積む。これが案件のあとの経験値になる
+    contribution: {
+      ...state.contribution,
+      [staff.id]: (state.contribution[staff.id] ?? 0) + gain,
+    },
     worked,
     lastWork: { staffId: staff.id, statKey: stat.key, gain, critical },
     done: worked >= WORK_COUNT,

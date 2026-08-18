@@ -70,6 +70,8 @@
 
       .choice-emoji { display: block; font-size: 20px; }
       .choice-sub { display: block; font-size: 11px; color: var(--muted); }
+      .choice-level { display: block; font-size: 11px; font-weight: 800; color: var(--accent); }
+      .choice-skills { display: block; font-size: 12px; }
 
       /* --- 開発中の舞台。ここが今回の主役 --- */
       #stage {
@@ -192,6 +194,42 @@
       }
       .review-comment { color: var(--muted); font-size: 12px; }
 
+      /* --- 成長（案件が終わったあと） --- */
+      #growth { display: grid; gap: 6px; text-align: left; }
+
+      .grow-row {
+        display: flex; align-items: center; gap: 10px;
+        background: var(--panel-hi); border-radius: 8px; padding: 8px 12px;
+        /* 1件ずつ順に出す。まとめて出すと「育った」感じが流れてしまう */
+        opacity: 0;
+        animation: grow-in 0.35s ease-out forwards;
+      }
+
+      @keyframes grow-in {
+        from { opacity: 0; transform: translateY(6px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+
+      .grow-emoji { font-size: 22px; }
+      .grow-body { flex: 1; display: grid; gap: 3px; }
+      .grow-name { font-size: 13px; font-weight: 700; }
+      .grow-exp { font-size: 11px; color: var(--muted); }
+
+      .grow-level {
+        font-size: 12px; font-weight: 800; color: var(--accent);
+      }
+
+      /* レベルアップは目立たせる。ここがカイロ系のごほうび */
+      .grow-row.levelup { border: 1px solid var(--accent); }
+      .grow-row.levelup .grow-level { font-size: 15px; }
+
+      .grow-track { height: 5px; background: #0a1119; border-radius: 99px; overflow: hidden; }
+      .grow-fill { height: 100%; background: var(--pop); }
+
+      .grow-skill {
+        font-size: 12px; font-weight: 700; color: var(--pop);
+      }
+
       #affinity-hint {
         font-size: 13px; font-weight: 700; padding: 10px;
         background: var(--panel-hi); border-radius: 8px;
@@ -234,6 +272,8 @@
         <div id="result-sales"></div>
         <div id="reviews" style="display: grid; gap: 6px"></div>
         <div id="affinity-hint"></div>
+        <div class="label" style="text-align: left; margin-top: 4px">メンバーの成長</div>
+        <div id="growth"></div>
         <button class="sub" id="again" type="button">つぎの案件へ</button>
       </section>
     </main>

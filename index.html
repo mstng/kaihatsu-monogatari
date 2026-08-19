@@ -73,6 +73,53 @@
       .choice-level { display: block; font-size: 11px; font-weight: 800; color: var(--accent); }
       .choice-skills { display: block; font-size: 12px; }
 
+      /* --- 会社の状況（常に見えている） --- */
+      #hud {
+        display: flex; align-items: center; gap: 10px;
+        background: var(--panel); border: 1px solid var(--line);
+        border-radius: 10px; padding: 10px 14px;
+      }
+      #hud-date { font-size: 12px; color: var(--muted); }
+      #hud-funds {
+        flex: 1; text-align: right;
+        font-size: 18px; font-weight: 800; color: var(--accent);
+        font-variant-numeric: tabular-nums;
+      }
+      #hud-funds.danger { color: var(--crit); }
+      #hud-staff { font-size: 12px; color: var(--muted); }
+
+      /* --- 依頼 --- */
+      #offers { display: grid; gap: 6px; }
+
+      .offer {
+        display: grid; gap: 4px;
+        padding: 11px 13px; text-align: left;
+        background: var(--panel-hi); border: 1px solid var(--line);
+        border-radius: 10px; color: var(--text);
+        font-family: inherit; font-size: 13px; cursor: pointer;
+      }
+      .offer[aria-pressed='true'] { border-color: var(--accent); background: #2c3a2a; }
+      .offer:disabled { opacity: 0.35; cursor: not-allowed; }
+
+      .offer-top { display: flex; align-items: baseline; gap: 8px; }
+      .offer-client { font-weight: 700; flex: 1; }
+      .offer-reward {
+        font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums;
+      }
+      .offer-sub { font-size: 11px; color: var(--muted); }
+
+      /* --- 精算 --- */
+      #settle { display: grid; gap: 4px; text-align: left; }
+      .settle-row {
+        display: flex; justify-content: space-between;
+        font-size: 13px; padding: 5px 12px;
+        background: var(--panel-hi); border-radius: 6px;
+        font-variant-numeric: tabular-nums;
+      }
+      .settle-row.total { font-weight: 800; font-size: 15px; }
+      .settle-row .plus { color: var(--pop); }
+      .settle-row .minus { color: var(--crit); }
+
       /* --- 開発中の舞台。ここが今回の主役 --- */
       #stage {
         position: relative;
@@ -240,15 +287,25 @@
     <main>
       <h1>開 発 会 社 を つ く る</h1>
 
+      <div id="hud">
+        <span id="hud-date"></span>
+        <span id="hud-staff"></span>
+        <span id="hud-funds"></span>
+      </div>
+
       <!-- ① 案件を決める -->
       <section id="setup">
         <div class="panel">
-          <div class="label">どんな案件をつくる？</div>
-          <div class="choices" id="genre-choices"></div>
+          <div class="label" id="offers-label">どの依頼を受ける？</div>
+          <div id="offers"></div>
         </div>
         <div class="panel" style="margin-top: 10px">
           <div class="label">なんの技術でつくる？</div>
           <div class="choices" id="tech-choices"></div>
+        </div>
+        <div class="panel" style="margin-top: 10px" id="hire-panel" hidden>
+          <div class="label" id="hire-label"></div>
+          <div class="choices" id="hire-choices"></div>
         </div>
         <div class="panel" style="margin-top: 10px">
           <div class="label" id="staff-label">だれにやってもらう？（3人まで）</div>
@@ -272,9 +329,18 @@
         <div id="result-sales"></div>
         <div id="reviews" style="display: grid; gap: 6px"></div>
         <div id="affinity-hint"></div>
+        <div class="label" style="text-align: left; margin-top: 4px">精算</div>
+        <div id="settle"></div>
         <div class="label" style="text-align: left; margin-top: 4px">メンバーの成長</div>
         <div id="growth"></div>
         <button class="sub" id="again" type="button">つぎの案件へ</button>
+      </section>
+
+      <!-- ④ 倒産 -->
+      <section id="gameover" class="panel" hidden style="text-align: center; display: grid; gap: 12px">
+        <h2 style="margin: 0; font-size: 22px">資金が尽きました</h2>
+        <div id="gameover-detail" style="font-size: 13px; color: var(--muted)"></div>
+        <button class="main" id="restart" type="button">もう一度はじめる</button>
       </section>
     </main>
 

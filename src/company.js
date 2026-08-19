@@ -173,3 +173,145 @@ export function grow(staffList, contribution, seed) {
 
   return { staff: grown, events, seed: s };
 }
+
+// --- 会社（資金・時間・雇用） ---
+//
+// ここまで（段階2まで）は失敗が存在せず、案件を選ぶ理由も無かった。
+// 給料という固定費を置くと、はじめて「この依頼を受けるか」に意味が出る。
+
+/**
+ * 社員ひとりの月給（万円）。これが固定費になる。
+ *
+ * 60 で始めたが、報酬に対して安すぎて何をしても黒字になり、
+ * 資金が「ただ増える数字」になっていた。人件費が案件報酬の
+ * おおよそ半分を占める水準まで上げてある。
+ */
+export const SALARY_PER_MONTH = 120;
+
+/** 開業資金（万円） */
+export const STARTING_FUNDS = 2000;
+
+/** 雇うときの一時金（万円）。以後ずっと月給がかかる */
+export const HIRE_COST = 400;
+
+/** はじめから在籍している社員 */
+export const FOUNDING_STAFF = ['tanaka', 'sato'];
+
+/** 会計年度の開始月 */
+const FISCAL_START_MONTH = 4;
+
+/** セーブの形。変えたら上げる */
+export const SAVE_VERSION = 1;
+
+/**
+ * 会社をつくる。
+ * 社員の実体（レベル・スキル）はここが持ち、案件をまたいで残る。
+ */
+export function createCompany(staffFactory, seed) {
+  return {
+    version: SAVE_VERSION,
+    seed: seed >>> 0,
+    staff: FOUNDING_STAFF.map(staffFactory).filter(Boolean),
+    funds: STARTING_FUNDS,
+    year: 1,
+    month: FISCAL_START_MONTH,
+    projects: 0,
+    history: [],
+    bankrupt: false,
+  };
+}
+
+/** 毎月かかる人件費 */
+export function monthlyCost(company) {
+  return company.staff.length * SALARY_PER_MONTH;
+}
+
+/** 「1年目 4月」のような表示用の文字列 */
+export function dateLabel(company) {
+  return `${company.year}年目 ${company.month}月`;
+}
+
+/** 月を進める。会計年度は4月はじまり */
+export function advanceMonths(company, months) {
+  let year = company.year;
+  let month = company.month + months;
+  while (month > 12) {
+    month -= 12;
+    if (month >= FISCAL_START_MONTH || company.month <= 12) year += 1;
+  }
+  return { ...company, year, month };
+}
+
+/**
+ * 案件が終わったときの精算。
+ *
+ * 入金と人件費を同時に処理するのは、プレイヤーに「差引でいくら残ったか」を
+ * 一度に見せたいから。別々に出すと、儲かったのかどうかが分からなくなる。
+ */
+export function settle(company, offer, payout) {
+  const cost = monthlyCost(company) * offer.months;
+  const funds = company.funds + payout - cost;
+
+  const settled = advanceMonths(
+    {
+      ...company,
+      funds,
+      projects: company.projects + 1,
+      bankrupt: funds < 0,
+      history: [
+        ...company.history,
+        { client: offer.client, size: offer.size, payout, cost, funds },
+      ],
+    },
+    offer.months,
+  );
+
+  return { company: settled, payout, cost, profit: payout - cost };
+}
+
+/** 雇えるか。一時金だけでなく、次の月給ぶんも残るかを見る */
+export function canHire(company) {
+  return !company.bankrupt && company.funds >= HIRE_COST + SALARY_PER_MONTH;
+}
+
+/** 雇う。すでに在籍している社員は雇えない */
+export function hire(company, staff) {
+  if (!staff || !canHire(company)) return company;
+  if (company.staff.some((s) => s.id === staff.id)) return company;
+  return {
+    ...company,
+    funds: company.funds - HIRE_COST,
+    staff: [...company.staff, staff],
+  };
+}
+
+// --- 保存 ---
+//
+// ここまで来ると1回の遊びが1セッションで終わらない。
+// 壊れたデータ・古いバージョン・欠損のどれが来ても例外を投げない。
+
+export function serialize(company) {
+  return JSON.stringify(company);
+}
+
+export function deserialize(text, fallback) {
+  if (!text) return fallback;
+  try {
+    const data = JSON.parse(text);
+    if (!data || typeof data !== 'object') return fallback;
+    if (data.version !== SAVE_VERSION) return fallback;
+    if (!Array.isArray(data.staff) || data.staff.length === 0) return fallback;
+    return {
+      ...fallback,
+      ...data,
+      // 数値が欠けていたら初期値で埋める。壊れた1項目で全部を捨てない
+      funds: Number.isFinite(data.funds) ? data.funds : fallback.funds,
+      year: Number.isFinite(data.year) ? data.year : fallback.year,
+      month: Number.isFinite(data.month) ? data.month : fallback.month,
+      staff: data.staff.map((s) => ({ ...s, skills: Array.isArray(s.skills) ? s.skills : [] })),
+      history: Array.isArray(data.history) ? data.history : [],
+    };
+  } catch {
+    return fallback;
+  }
+}

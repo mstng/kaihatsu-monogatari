@@ -190,3 +190,135 @@ test('スキルを持つ社員のほうが、その指標をよく伸ばす', ()
   };
   assert.ok(designOf(skilled) > designOf(plain), 'スキルが指標に効いていない');
 });
+
+// --- 会社（資金・時間・雇用・保存） ---
+
+import {
+  SALARY_PER_MONTH,
+  STARTING_FUNDS,
+  HIRE_COST,
+  SAVE_VERSION,
+  createCompany,
+  monthlyCost,
+  dateLabel,
+  advanceMonths,
+  settle,
+  canHire,
+  hire,
+  serialize,
+  deserialize,
+} from '../src/company.js';
+
+const newCompany = (seed = 1) => createCompany(createStaff, seed);
+
+test('会社は開業資金と社員を持って始まる', () => {
+  const c = newCompany();
+  assert.equal(c.funds, STARTING_FUNDS);
+  assert.ok(c.staff.length > 0);
+  assert.equal(c.bankrupt, false);
+  assert.equal(c.version, SAVE_VERSION);
+});
+
+test('人件費は社員数に比例する', () => {
+  const c = newCompany();
+  assert.equal(monthlyCost(c), c.staff.length * SALARY_PER_MONTH);
+});
+
+test('月が進み、12月を越えると年が変わる', () => {
+  const c = { year: 1, month: 11 };
+  assert.equal(advanceMonths(c, 1).month, 12);
+  const next = advanceMonths(c, 3);
+  assert.equal(next.month, 2);
+  assert.equal(next.year, 2);
+});
+
+test('日付の表示が出る', () => {
+  assert.match(dateLabel(newCompany()), /年目/);
+});
+
+test('精算で入金と人件費が同時に引かれ、月が進む', () => {
+  const c = newCompany();
+  const offer = { client: 'さくら商事', size: 'medium', months: 3, reward: 2000 };
+  const result = settle(c, offer, 2000);
+
+  const expectedCost = monthlyCost(c) * offer.months;
+  assert.equal(result.cost, expectedCost);
+  assert.equal(result.profit, 2000 - expectedCost);
+  assert.equal(result.company.funds, STARTING_FUNDS + 2000 - expectedCost);
+  assert.equal(result.company.month, c.month + offer.months);
+  assert.equal(result.company.projects, 1);
+  assert.equal(result.company.history.length, 1);
+});
+
+test('資金が尽きると倒産する', () => {
+  const c = { ...newCompany(), funds: 10 };
+  const result = settle(c, { client: 'X', size: 'small', months: 5, reward: 0 }, 0);
+  assert.equal(result.company.bankrupt, true);
+  assert.ok(result.company.funds < 0);
+});
+
+test('元の会社は書き換わらない（イミュータブル）', () => {
+  const c = newCompany();
+  const snapshot = JSON.stringify(c);
+  settle(c, { client: 'X', size: 'small', months: 2, reward: 900 }, 900);
+  assert.equal(JSON.stringify(c), snapshot);
+});
+
+test('雇うと一時金が減り、社員が増える', () => {
+  const c = newCompany();
+  const after = hire(c, createStaff('suzuki'));
+  assert.equal(after.funds, c.funds - HIRE_COST);
+  assert.equal(after.staff.length, c.staff.length + 1);
+});
+
+test('同じ社員は二度雇えない', () => {
+  const c = newCompany();
+  const once = hire(c, createStaff('suzuki'));
+  const twice = hire(once, createStaff('suzuki'));
+  assert.equal(twice.staff.length, once.staff.length);
+  assert.equal(twice.funds, once.funds);
+});
+
+test('資金が足りなければ雇えない', () => {
+  const poor = { ...newCompany(), funds: 10 };
+  assert.equal(canHire(poor), false);
+  assert.equal(hire(poor, createStaff('suzuki')).staff.length, poor.staff.length);
+});
+
+test('倒産していたら雇えない', () => {
+  const dead = { ...newCompany(), bankrupt: true };
+  assert.equal(canHire(dead), false);
+});
+
+// --- 保存 ---
+
+test('保存して読み戻すと同じ状態になる', () => {
+  const c = hire(newCompany(), createStaff('suzuki'));
+  assert.deepEqual(deserialize(serialize(c), newCompany()), c);
+});
+
+test('壊れたデータでも初期状態にフォールバックする', () => {
+  const fallback = newCompany();
+  for (const broken of ['', 'null', '{{{', '[]', '{"version":1}']) {
+    assert.deepEqual(deserialize(broken, fallback), fallback);
+  }
+});
+
+test('知らないバージョンのセーブは読まない', () => {
+  const fallback = newCompany();
+  const future = JSON.stringify({ ...fallback, version: SAVE_VERSION + 99 });
+  assert.deepEqual(deserialize(future, fallback), fallback);
+});
+
+test('項目が欠けても読める範囲は生かす', () => {
+  const fallback = newCompany();
+  const partial = JSON.stringify({
+    version: SAVE_VERSION,
+    staff: [{ ...createStaff('tanaka'), skills: undefined }],
+    funds: 555,
+  });
+  const loaded = deserialize(partial, fallback);
+  assert.equal(loaded.funds, 555);
+  assert.deepEqual(loaded.staff[0].skills, []);
+  assert.equal(loaded.year, fallback.year);
+});

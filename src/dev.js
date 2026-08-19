@@ -14,8 +14,25 @@ import { skillEffects, levelMultiplier } from './company.js';
 
 // --- チューニング定数 ---
 
-/** 1案件あたりの作業回数。これが開発シーンの長さになる */
-export const WORK_COUNT = 36;
+/** 案件の規模。作業回数・報酬・かかる月数が変わる */
+/**
+ * 案件の規模。
+ *
+ * teamSize（必要人数）が肝。これが無いと、社員を雇うほど人件費だけ増えて
+ * 出来高は変わらず、雇用が常に損になる。大きい案件を受けるには人が要る、
+ * という形にして初めて「雇う」が投資になる。
+ *
+ * 報酬は「人件費のおよそ2倍」を目安に置いてある。
+ * 評価が低いと赤字、高いと大きく黒字、という幅を作るため。
+ */
+export const SIZES = {
+  small: { key: 'small', label: '小口', workCount: 22, months: 2, teamSize: 2, reward: 900 },
+  medium: { key: 'medium', label: '中堅', workCount: 36, months: 3, teamSize: 3, reward: 1800 },
+  large: { key: 'large', label: '大型', workCount: 54, months: 5, teamSize: 4, reward: 4800 },
+};
+
+/** 規模を指定しなかったときの作業回数（既定は中堅ぶん） */
+export const WORK_COUNT = SIZES.medium.workCount;
 
 /** 1回の作業で出る基礎の数字 */
 export const BASE_GAIN = 3;
@@ -143,18 +160,76 @@ export function affinityOf(genreId, techId) {
   return AFFINITY[genreId]?.[techId] ?? 'normal';
 }
 
+/** 依頼元。実在の企業と紛らわしくならない、それっぽい架空の名前にする */
+const CLIENTS = [
+  'さくら商事',
+  'あおば銀行',
+  'みらい物流',
+  'ひので製菓',
+  'かなで出版',
+  'つばさ観光',
+  'こもれび不動産',
+  'はやて運輸',
+  'なぎさ水産',
+  'あかつき電機',
+];
+
+// --- 依頼が来る ---
+
+/**
+ * 依頼を何件か作る。プレイヤーはここから1件選ぶ。
+ *
+ * 選ばせることが目的なので、規模は必ずばらけさせる。
+ * 全部同じ大きさだと「どれでもいい」になり、選択が消える。
+ */
+export function generateOffers(seed, count = 3) {
+  let s = seed >>> 0;
+  const sizes = Object.values(SIZES);
+  const offers = [];
+
+  for (let i = 0; i < count; i++) {
+    const size = sizes[i % sizes.length];
+
+    const genreRoll = randomInt(s, GENRES.length);
+    s = genreRoll.seed;
+    const clientRoll = randomInt(s, CLIENTS.length);
+    s = clientRoll.seed;
+    const rewardRoll = nextRandom(s);
+    s = rewardRoll.seed;
+
+    offers.push({
+      id: `offer${i}`,
+      client: CLIENTS[clientRoll.value],
+      genreId: GENRES[genreRoll.value].id,
+      size: size.key,
+      label: size.label,
+      workCount: size.workCount,
+      months: size.months,
+      teamSize: size.teamSize,
+      // 報酬は ±15% ゆらす。同じ規模でも当たり外れが出るように
+      reward: Math.round(size.reward * (0.85 + rewardRoll.value * 0.3)),
+    });
+  }
+
+  return { offers, seed: s };
+}
+
 // --- 案件をはじめる ---
 
 /**
  * 開発を開始した状態を作る。
  * 同じ種・同じ選択なら必ず同じ結果になる（やり直しで結果が変わらない）。
  */
-export function startProject({ genreId, techId, staff }, seed) {
+export function startProject({ genreId, techId, staff, workCount, offer }, seed) {
   return {
     seed: seed >>> 0,
     initialSeed: seed >>> 0,
     genreId,
     techId,
+    // 規模によって作業回数が変わる。指定がなければ中堅ぶん
+    workCount: workCount ?? WORK_COUNT,
+    // どの依頼を受けたか。報酬の計算に使う
+    offer: offer ?? null,
     // 社員は「実体」を受け取る。レベルやスキルを work() が見るため、
     // IDだけ渡す形だと成長が結果に反映されない
     staff: staff.map((s) => ({ ...s })),
@@ -235,13 +310,13 @@ export function work(state) {
     },
     worked,
     lastWork: { staffId: staff.id, statKey: stat.key, gain, critical },
-    done: worked >= WORK_COUNT,
+    done: worked >= state.workCount,
   };
 }
 
 /** 進み具合（0〜1）。画面のゲージに使う */
 export function progress(state) {
-  return Math.min(1, state.worked / WORK_COUNT);
+  return Math.min(1, state.worked / state.workCount);
 }
 
 export function totalScore(state) {
@@ -278,13 +353,17 @@ export function review(state) {
     state.stats[stat.key] > state.stats[best.key] ? stat : best,
   );
 
+  // 基準は作業回数に比例させる。固定にすると、
+  // 作業回数の多い大型案件が自動的に高評価になってしまう
+  const pivot = SCORE_PIVOT * (state.workCount / WORK_COUNT);
+
   let s = state.seed;
   const reviews = [];
   for (let i = 0; i < REVIEWER_COUNT; i++) {
     const roll = nextRandom(s);
     s = roll.seed;
     // 基準値との比で決め、レビュアーごとに ±1.5 のばらつきを乗せる
-    const base = (total / SCORE_PIVOT) * 6;
+    const base = (total / pivot) * 6;
     const score = Math.max(
       1,
       Math.min(MAX_SCORE_PER_REVIEWER, Math.round(base + (roll.value - 0.5) * 3)),
@@ -295,8 +374,14 @@ export function review(state) {
   const scoreSum = reviews.reduce((sum, r) => sum + r.score, 0);
   const maxSum = REVIEWER_COUNT * MAX_SCORE_PER_REVIEWER;
 
-  // 売上。評価が高いほど伸びる。段階1では結果を実感させるためだけに使う
-  const sales = Math.round(total * 3 * (0.5 + scoreSum / maxSum));
+  // 入金。依頼の報酬を土台に、評価で増減する。
+  //
+  // 下限を 0.1 と低く置いているのは、評価が低いと赤字になるようにするため。
+  // 下限が人件費を上回っていると、何をしても黒字になり、資金に意味が無くなる
+  // （最初は 0.6 にしていて、どんな作り方をしても儲かる状態になっていた）。
+  const payout = state.offer
+    ? Math.round(state.offer.reward * (0.1 + (scoreSum / maxSum) * 1.0))
+    : Math.round(total * 3 * (0.5 + scoreSum / maxSum));
 
   return {
     total,
@@ -304,7 +389,8 @@ export function review(state) {
     reviews,
     scoreSum,
     maxSum,
-    sales,
+    sales: payout,
+    payout,
     affinity: affinityOf(state.genreId, state.techId),
     hit: scoreSum >= maxSum * 0.75,
   };

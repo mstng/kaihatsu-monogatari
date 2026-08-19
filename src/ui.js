@@ -11,7 +11,6 @@
 import {
   STATS,
   TECHS,
-  STAFF_POOL,
   SIZES,
   startProject,
   work,
@@ -22,14 +21,18 @@ import {
   findTech,
   createStaff,
   generateOffers,
+  generateCandidate,
+  talentStars,
 } from './dev.js';
 import {
   grow,
   expToNext,
   findSkill,
   MAX_LEVEL,
-  HIRE_COST,
   SALARY_PER_MONTH,
+  hireCost,
+  remember,
+  recalledAffinity,
   createCompany,
   monthlyCost,
   dateLabel,
@@ -50,6 +53,9 @@ const FINISH_DELAY_MS = 700;
 
 /** 保存キー。これは今後ずっと変えない（変えると進行が消えたのと同じになる） */
 const SAVE_KEY = 'kaihatsu:save';
+
+/** 過去に試した相性の印。ひと目で優劣が分かる記号にする */
+const AFFINITY_MARK = { great: '◎', good: '○', normal: '△', bad: '✕' };
 
 const el = {};
 for (const id of [
@@ -78,10 +84,27 @@ function freshCompany() {
   return withOffers(createCompany(createStaff, seed));
 }
 
-/** 依頼を並べ直す。会社の状態に持たせるので、リロードしても同じ依頼が出る */
+/**
+ * 依頼と応募者を並べ直す。会社の状態に持たせるので、リロードしても同じ顔ぶれが出る。
+ * 毎回ちがう人が来ることで、採用が「図鑑を埋める作業」ではなく判断になる。
+ */
 function withOffers(target) {
   const result = generateOffers(target.seed, 3);
-  return { ...target, offers: result.offers, seed: result.seed };
+
+  let s = result.seed;
+  const applicants = [];
+  // 同じ名字が並ぶと紛らわしいので、被ったら引き直す。
+  // 何度も引き直して止まらないことがないよう、試行回数で打ち切る
+  for (let attempt = 0; attempt < 12 && applicants.length < 2; attempt++) {
+    const candidate = generateCandidate(s, attempt);
+    s = candidate.seed;
+    if (target.staff.some((m) => m.id === candidate.id)) continue;
+    if (target.staff.some((m) => m.name === candidate.name)) continue;
+    if (applicants.some((a) => a.name === candidate.name)) continue;
+    applicants.push(candidate);
+  }
+
+  return { ...target, offers: result.offers, applicants, seed: s };
 }
 
 function save() {
@@ -162,12 +185,21 @@ function renderSetup() {
 
   el['tech-choices'].innerHTML = '';
   for (const tech of TECHS) {
-    el['tech-choices'].appendChild(
-      choiceButton(tech.emoji, tech.name, '', picked.techId === tech.id, () => {
-        picked.techId = tech.id;
-        renderSetup();
-      }),
-    );
+    const button = choiceButton(tech.emoji, tech.name, '', picked.techId === tech.id, () => {
+      picked.techId = tech.id;
+      renderSetup();
+    });
+
+    // 依頼を選んだあとだけ、そのジャンルで過去に試した結果を思い出す。
+    // 試していない組み合わせは伏せたままなので、見つける楽しみは残る
+    const known = offer ? recalledAffinity(company, offer.genreId, tech.id) : null;
+    const mark = document.createElement('span');
+    mark.className = `choice-memo memo-${known ?? 'unknown'}`;
+    mark.textContent = known ? AFFINITY_MARK[known] : '？';
+    mark.title = known ? affinityHint(known) : 'この組み合わせは まだ ためしていない';
+    button.appendChild(mark);
+
+    el['tech-choices'].appendChild(button);
   }
 
   el['staff-choices'].innerHTML = '';
@@ -207,24 +239,40 @@ function renderSetup() {
 }
 
 function renderHire() {
-  const candidates = STAFF_POOL.filter((s) => !company.staff.some((m) => m.id === s.id));
-  if (candidates.length === 0 || !canHire(company)) {
+  const candidates = company.applicants ?? [];
+  if (candidates.length === 0) {
     el['hire-panel'].hidden = true;
     return;
   }
 
   el['hire-panel'].hidden = false;
-  el['hire-label'].textContent = `人を増やす？（支度金 ${HIRE_COST}万 ＋ 毎月 ${SALARY_PER_MONTH}万）`;
+  el['hire-label'].textContent = `応募が来ています（毎月 ${SALARY_PER_MONTH}万かかります）`;
   el['hire-choices'].innerHTML = '';
 
   for (const candidate of candidates) {
-    el['hire-choices'].appendChild(
-      choiceButton(candidate.emoji, candidate.name, candidate.role, false, () => {
-        company = hire(company, createStaff(candidate.id));
-        save();
-        renderSetup();
-      }),
-    );
+    const cost = hireCost(candidate);
+    const affordable = canHire(company, candidate);
+
+    const button = choiceButton(candidate.emoji, candidate.name, candidate.role, false, () => {
+      if (!affordable) return;
+      company = hire(company, candidate);
+      save();
+      renderSetup();
+    });
+    button.disabled = !affordable;
+
+    // 素質は数値ではなく★で見せる。ひと目で比べられるほうが選びやすい
+    const stars = document.createElement('span');
+    stars.className = 'choice-level';
+    stars.textContent = talentStars(candidate.talent);
+    button.appendChild(stars);
+
+    const price = document.createElement('span');
+    price.className = 'choice-sub';
+    price.textContent = `支度金 ${cost}万`;
+    button.appendChild(price);
+
+    el['hire-choices'].appendChild(button);
   }
 }
 
@@ -369,6 +417,9 @@ function showResult() {
 
   // 相性は数値では見せない。次に活きる「気づき」として言葉で返す
   el['affinity-hint'].textContent = affinityHint(result.affinity);
+
+  // 試した組み合わせを控えておく。21通りを記憶に頼らせると発見が苦痛になる
+  company = remember(company, state.genreId, state.techId, result.affinity);
 
   applyGrowth();
   applySettlement(offer, result.payout);

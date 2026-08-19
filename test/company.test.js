@@ -205,6 +205,7 @@ import {
   settle,
   canHire,
   hire,
+  hireCost,
   serialize,
   deserialize,
 } from '../src/company.js';
@@ -321,4 +322,32 @@ test('項目が欠けても読める範囲は生かす', () => {
   assert.equal(loaded.funds, 555);
   assert.deepEqual(loaded.staff[0].skills, []);
   assert.equal(loaded.year, fallback.year);
+});
+
+// --- 応募者の採用 ---
+
+test('支度金は素質が高いほど高い', () => {
+  const plain = { id: 'a', talent: 0.8, name: 'A' };
+  const gifted = { id: 'b', talent: 1.35, name: 'B' };
+  assert.ok(hireCost(gifted) > hireCost(plain));
+  // 素質を持たない相手でも落ちない
+  assert.ok(hireCost({ id: 'c' }) > 0);
+});
+
+test('雇うと応募者リストから外れる（二重に雇えない）', () => {
+  const candidate = { id: 'x', name: '新人', talent: 1.0, level: 1, exp: 0, skills: [], bias: {} };
+  const base = { ...newCompany(), applicants: [candidate] };
+  const after = hire(base, candidate);
+  assert.equal(after.applicants.length, 0);
+  assert.equal(after.staff.length, base.staff.length + 1);
+
+  // もう一度雇おうとしても増えない
+  assert.equal(hire(after, candidate).staff.length, after.staff.length);
+});
+
+test('支度金を払えなければ雇えない', () => {
+  const candidate = { id: 'x', name: '新人', talent: 1.35, level: 1, exp: 0, skills: [], bias: {} };
+  const poor = { ...newCompany(), funds: 100, applicants: [candidate] };
+  assert.equal(canHire(poor, candidate), false);
+  assert.equal(hire(poor, candidate).staff.length, poor.staff.length);
 });

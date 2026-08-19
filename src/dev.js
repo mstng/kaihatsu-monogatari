@@ -79,6 +79,9 @@ export const TECHS = [
   { id: 'java', name: 'Java', emoji: '☕' },
   { id: 'python', name: 'Python', emoji: '🐍' },
   { id: 'ts', name: 'TypeScript', emoji: '🔷' },
+  { id: 'go', name: 'Go', emoji: '🐹' },
+  { id: 'ruby', name: 'Ruby', emoji: '💎' },
+  { id: 'kotlin', name: 'Kotlin', emoji: '🟣' },
 ];
 
 /**
@@ -88,10 +91,40 @@ export const TECHS = [
  * 隠しておいて、遊んだ結果から「あの組み合わせは良かった」と覚えてもらう。
  * これがゲーム発展国の「ジャンル×題材」と同じ仕掛けで、リプレイの動機そのものになる。
  */
+// どのジャンルも「かみ合う1つ・わるくない2つ・ふつう2つ・かみ合わない2つ」で揃えてある。
+// 当たりが1つだけだと「見つけた」瞬間がはっきりし、
+// 外れも2つあるので、適当に選ぶと痛い目を見る。
 const AFFINITY = {
-  gyomu: { php: 'good', java: 'great', python: 'normal', ts: 'bad' },
-  ec: { php: 'great', java: 'normal', python: 'bad', ts: 'good' },
-  app: { php: 'bad', java: 'normal', python: 'good', ts: 'great' },
+  gyomu: {
+    java: 'great',
+    php: 'good',
+    // Python はここが見せ場。業務系の集計・自動化と噛み合う。
+    // 最初は全ジャンルで normal 以下にしてしまい、選ぶ理由のない
+    // 「死に技術」になっていた（テストで発覚）
+    python: 'good',
+    kotlin: 'normal',
+    go: 'normal',
+    ts: 'bad',
+    ruby: 'bad',
+  },
+  ec: {
+    php: 'great',
+    ruby: 'good',
+    ts: 'good',
+    java: 'normal',
+    go: 'normal',
+    python: 'bad',
+    kotlin: 'bad',
+  },
+  app: {
+    ts: 'great',
+    kotlin: 'good',
+    go: 'good',
+    python: 'normal',
+    java: 'normal',
+    php: 'bad',
+    ruby: 'bad',
+  },
 };
 
 /**
@@ -145,6 +178,74 @@ export function createStaff(id) {
 
 export function findStaff(id) {
   return STAFF_POOL.find((s) => s.id === id);
+}
+
+// --- 応募者 ---
+//
+// 固定の4人を順に雇うだけだと、採用が「図鑑を埋める作業」になり判断が消える。
+// 毎回ちがう人が応募してくる形にして、はじめて「この人を採るか」に意味が出る。
+
+/**
+ * 素質。出る数字にそのまま掛かる。
+ * 幅を持たせることで「安いが凡庸」「高いが伸びる」の選択が生まれる。
+ */
+export const TALENT_RANGE = { min: 0.8, max: 1.35 };
+
+const FAMILY_NAMES = [
+  '伊藤', '山本', '中村', '小林', '加藤', '吉田', '山田', '佐々木',
+  '松本', '井上', '木村', '林', '清水', '山崎', '池田', '橋本',
+];
+
+/** 職種のひな形。得意分野と、手の伸びやすさの傾向を決める */
+const ARCHETYPES = [
+  { role: 'バックエンド', emoji: '🧑‍💻', specialty: 'tech', bias: { usability: 2, tech: 6, design: 1, stability: 3 } },
+  { role: 'フロントエンド', emoji: '👩‍🎨', specialty: 'design', bias: { usability: 4, tech: 2, design: 6, stability: 1 } },
+  { role: 'インフラ', emoji: '🧑‍🔧', specialty: 'stability', bias: { usability: 1, tech: 3, design: 1, stability: 6 } },
+  { role: 'ディレクター', emoji: '🧑‍💼', specialty: 'usability', bias: { usability: 6, tech: 2, design: 3, stability: 2 } },
+  { role: 'なんでも屋', emoji: '🧑‍🚀', specialty: 'tech', bias: { usability: 3, tech: 3, design: 3, stability: 3 } },
+];
+
+/**
+ * 応募者を作る。同じ種なら同じ人が来る。
+ * index は「同時に来た何人目か」で、種をずらすためだけに使う。
+ */
+export function generateCandidate(seed, index = 0) {
+  let s = (seed + index * 7919) >>> 0;
+
+  const nameRoll = randomInt(s, FAMILY_NAMES.length);
+  s = nameRoll.seed;
+  const typeRoll = randomInt(s, ARCHETYPES.length);
+  s = typeRoll.seed;
+  const talentRoll = nextRandom(s);
+  s = talentRoll.seed;
+
+  const archetype = ARCHETYPES[typeRoll.value];
+  const talent =
+    Math.round((TALENT_RANGE.min + talentRoll.value * (TALENT_RANGE.max - TALENT_RANGE.min)) * 100) /
+    100;
+
+  return {
+    // 同じ人を二度雇わないよう、名前と職種から決まるIDにする
+    id: `hire-${nameRoll.value}-${typeRoll.value}`,
+    name: FAMILY_NAMES[nameRoll.value],
+    emoji: archetype.emoji,
+    role: archetype.role,
+    specialty: archetype.specialty,
+    bias: { ...archetype.bias },
+    talent,
+    level: 1,
+    exp: 0,
+    skills: [],
+    seed: s,
+  };
+}
+
+/** 素質を★で表す。数値をそのまま見せるより、ひと目で比べられる */
+export function talentStars(talent) {
+  const span = TALENT_RANGE.max - TALENT_RANGE.min;
+  const ratio = (talent - TALENT_RANGE.min) / span;
+  const filled = Math.max(1, Math.min(5, Math.round(ratio * 4) + 1));
+  return '★'.repeat(filled) + '☆'.repeat(5 - filled);
 }
 
 export function findGenre(id) {
@@ -284,6 +385,8 @@ export function work(state) {
   const affinity = affinityOf(state.genreId, state.techId);
   let gain = BASE_GAIN + Math.floor(wobble.value * 4) + skills.flatGain; // 3〜6 ＋スキル
   if (staff.specialty === stat.key) gain = Math.round(gain * SPECIALTY_BONUS);
+  // 素質。応募者ごとに違う。既存の創業メンバーは 1.0 として扱う
+  gain = Math.round(gain * (staff.talent ?? 1));
   gain = Math.round(gain * levelMultiplier(staff));
   gain = Math.round(gain * AFFINITY_BONUS[affinity]);
 

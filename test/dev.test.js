@@ -22,6 +22,11 @@ import {
   affinityHint,
   findStaff,
   createStaff,
+  generateOffers,
+  generateCandidate,
+  talentStars,
+  TALENT_RANGE,
+  SIZES,
 } from '../src/dev.js';
 
 /** 社員の実体を作る。startProject は ID ではなく実体を受け取る（レベルとスキルを見るため） */
@@ -204,4 +209,131 @@ test('相性のヒントは4種類とも言葉が返る', () => {
   }
   // 知らない値でも落ちない
   assert.ok(affinityHint('unknown').length > 0);
+});
+
+// --- 依頼 ---
+
+test('依頼は指定した件数ぶん来て、規模がばらける', () => {
+  const { offers } = generateOffers(1, 3);
+  assert.equal(offers.length, 3);
+  // 全部同じ大きさだと「どれでもいい」になり、選択が消える
+  assert.equal(new Set(offers.map((o) => o.size)).size, 3);
+  for (const offer of offers) {
+    assert.ok(offer.client && offer.reward > 0 && offer.months > 0);
+    assert.ok(offer.teamSize > 0 && offer.workCount > 0);
+    assert.ok(GENRES.some((g) => g.id === offer.genreId));
+  }
+});
+
+test('依頼は同じ種なら同じ内容になる', () => {
+  assert.deepEqual(generateOffers(42, 3).offers, generateOffers(42, 3).offers);
+});
+
+test('規模が大きいほど、必要人数も期間も報酬も増える', () => {
+  const { small, medium, large } = SIZES;
+  assert.ok(small.teamSize < medium.teamSize && medium.teamSize < large.teamSize);
+  assert.ok(small.months < medium.months && medium.months < large.months);
+  assert.ok(small.reward < medium.reward && medium.reward < large.reward);
+  assert.ok(small.workCount < medium.workCount && medium.workCount < large.workCount);
+});
+
+test('作業回数は依頼の規模ぶんだけ行われる', () => {
+  const staff = team('tanaka', 'sato');
+  let state = startProject({ ...SETUP, staff, workCount: SIZES.small.workCount }, 5);
+  let steps = 0;
+  while (!state.done && steps < 200) {
+    state = work(state);
+    steps++;
+  }
+  assert.equal(steps, SIZES.small.workCount);
+});
+
+// --- 応募者 ---
+
+test('応募者は同じ種なら同じ人が来る', () => {
+  assert.deepEqual(generateCandidate(77, 0), generateCandidate(77, 0));
+});
+
+test('応募者は種がちがえば別人になる', () => {
+  const a = generateCandidate(1, 0);
+  const b = generateCandidate(2, 0);
+  assert.notEqual(`${a.name}${a.role}${a.talent}`, `${b.name}${b.role}${b.talent}`);
+});
+
+test('応募者は素質を持ち、範囲に収まる', () => {
+  for (let seed = 1; seed <= 200; seed++) {
+    const c = generateCandidate(seed, 0);
+    assert.ok(c.talent >= TALENT_RANGE.min && c.talent <= TALENT_RANGE.max, `範囲外: ${c.talent}`);
+    assert.equal(c.level, 1);
+    assert.deepEqual(c.skills, []);
+    assert.ok(STATS.some((s) => s.key === c.specialty));
+    for (const stat of STATS) assert.ok(c.bias[stat.key] > 0);
+  }
+});
+
+test('素質にはばらつきがある（全員同じでは選ぶ意味がない）', () => {
+  const talents = new Set();
+  for (let seed = 1; seed <= 100; seed++) talents.add(generateCandidate(seed, 0).talent);
+  assert.ok(talents.size > 20, `ばらつきが少なすぎる: ${talents.size}種類`);
+});
+
+test('素質が高い社員のほうが大きい数字を出す', () => {
+  const base = createStaff('tanaka');
+  const sum = (talent) => {
+    let total = 0;
+    for (let seed = 1; seed <= 30; seed++) {
+      let st = startProject({ ...SETUP, staff: [{ ...base, talent }] }, seed);
+      while (!st.done) st = work(st);
+      total += totalScore(st);
+    }
+    return total;
+  };
+  assert.ok(sum(TALENT_RANGE.max) > sum(TALENT_RANGE.min), '素質が数字に効いていない');
+});
+
+test('素質を持たない創業メンバーでも落ちない（1.0として扱う）', () => {
+  const staff = team('tanaka');
+  assert.equal(staff[0].talent, undefined);
+  let st = startProject({ ...SETUP, staff }, 3);
+  while (!st.done) st = work(st);
+  assert.ok(totalScore(st) > 0);
+});
+
+test('素質は★5段階で表され、高いほど星が多い', () => {
+  const low = talentStars(TALENT_RANGE.min);
+  const high = talentStars(TALENT_RANGE.max);
+  assert.equal(low.length, 5);
+  assert.equal(high.length, 5);
+  assert.ok([...high].filter((c) => c === '★').length > [...low].filter((c) => c === '★').length);
+});
+
+// --- 相性表の広がり ---
+
+test('どのジャンルにも「かみ合う」技術がちょうど1つある', () => {
+  // 当たりが1つだけだから「見つけた」瞬間がはっきりする
+  for (const genre of GENRES) {
+    const greats = TECHS.filter((t) => affinityOf(genre.id, t.id) === 'great');
+    assert.equal(greats.length, 1, `${genre.name} の当たりが ${greats.length} 個`);
+  }
+});
+
+test('どのジャンルにも「かみ合わない」技術がある（適当に選ぶと痛い）', () => {
+  for (const genre of GENRES) {
+    const bads = TECHS.filter((t) => affinityOf(genre.id, t.id) === 'bad');
+    assert.ok(bads.length >= 2, `${genre.name} の外れが少なすぎる`);
+  }
+});
+
+test('組み合わせは記憶に頼るには多い（記録の仕組みが要る根拠）', () => {
+  assert.ok(GENRES.length * TECHS.length >= 20);
+});
+
+test('どの技術も、どこかのジャンルでは活きる（死に技術を作らない）', () => {
+  for (const tech of TECHS) {
+    const best = GENRES.map((g) => affinityOf(g.id, tech.id));
+    assert.ok(
+      best.some((a) => a === 'great' || a === 'good'),
+      `${tech.name} が どのジャンルでも活きない`,
+    );
+  }
 });

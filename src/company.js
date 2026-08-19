@@ -226,6 +226,32 @@ export function monthlyCost(company) {
   return company.staff.length * SALARY_PER_MONTH;
 }
 
+// --- 相性の記録 ---
+//
+// 技術が7種になり、ジャンル×技術の組み合わせは21通りになった。
+// 全部を記憶に頼らせると、発見が楽しみではなく苦痛になる。
+// 一度試した組み合わせは控えておいて、次に選ぶときの手がかりにする。
+//
+// 記録するのは「試したもの」だけ。試していない組み合わせは伏せたままなので、
+// 見つける楽しみ自体は残る。
+
+/** 組み合わせを1つのキーにする */
+export function comboKey(genreId, techId) {
+  return `${genreId}:${techId}`;
+}
+
+/** その組み合わせを過去に試していれば、そのときの相性を返す */
+export function recalledAffinity(company, genreId, techId) {
+  return company.discovered?.[comboKey(genreId, techId)] ?? null;
+}
+
+/** 試した結果を控える。すでに知っていれば何も変わらない */
+export function remember(company, genreId, techId, affinity) {
+  const key = comboKey(genreId, techId);
+  if (company.discovered?.[key] === affinity) return company;
+  return { ...company, discovered: { ...(company.discovered ?? {}), [key]: affinity } };
+}
+
 /** 「1年目 4月」のような表示用の文字列 */
 export function dateLabel(company) {
   return `${company.year}年目 ${company.month}月`;
@@ -269,19 +295,33 @@ export function settle(company, offer, payout) {
   return { company: settled, payout, cost, profit: payout - cost };
 }
 
-/** 雇えるか。一時金だけでなく、次の月給ぶんも残るかを見る */
-export function canHire(company) {
-  return !company.bankrupt && company.funds >= HIRE_COST + SALARY_PER_MONTH;
+/**
+ * その応募者を雇うのにかかる支度金。
+ * 素質が高いほど高い。「安いが凡庸」「高いが伸びる」を選ばせるための値段差。
+ */
+export function hireCost(candidate) {
+  return Math.round(HIRE_COST * (candidate?.talent ?? 1));
 }
 
-/** 雇う。すでに在籍している社員は雇えない */
-export function hire(company, staff) {
-  if (!staff || !canHire(company)) return company;
-  if (company.staff.some((s) => s.id === staff.id)) return company;
+/** 雇えるか。支度金だけでなく、増えたあとの月給ぶんも残るかを見る */
+export function canHire(company, candidate) {
+  if (company.bankrupt) return false;
+  return company.funds >= hireCost(candidate) + SALARY_PER_MONTH;
+}
+
+/** 雇う。すでに在籍している人は雇えない */
+export function hire(company, candidate) {
+  if (!candidate || !canHire(company, candidate)) return company;
+  if (company.staff.some((s) => s.id === candidate.id)) return company;
+
+  // 応募者リストから外す。雇ったのに残っていると二重に雇えてしまう
+  const applicants = (company.applicants ?? []).filter((a) => a.id !== candidate.id);
+
   return {
     ...company,
-    funds: company.funds - HIRE_COST,
-    staff: [...company.staff, staff],
+    funds: company.funds - hireCost(candidate),
+    staff: [...company.staff, { ...candidate }],
+    applicants,
   };
 }
 

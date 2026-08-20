@@ -1,8 +1,8 @@
 {
-  "name": "kaihatsu",
+  "name": "kaihatsu-monogatari",
   "version": "0.1.0",
   "private": true,
-  "description": "開発会社をつくる。案件をつくってリリースし、評価をもらう経営シミュレーション。",
+  "description": "開発会社物語。案件を受け、技術を選び、社員を育てる経営シミュレーション。",
   "type": "module",
   "scripts": {
     "test": "node --test",

@@ -208,6 +208,9 @@ import {
   hireCost,
   serialize,
   deserialize,
+  snapshotYear,
+  yearSummary,
+  closeYear,
 } from '../src/company.js';
 
 const newCompany = (seed = 1) => createCompany(createStaff, seed);
@@ -225,12 +228,30 @@ test('人件費は社員数に比例する', () => {
   assert.equal(monthlyCost(c), c.staff.length * SALARY_PER_MONTH);
 });
 
-test('月が進み、12月を越えると年が変わる', () => {
+test('年度は4月はじまり。1月をまたいでも年度は変わらない', () => {
+  // 以前は1月で年が変わっていた（会計年度は4月はじまりなのに）。
+  // テストのほうがその挙動を正しいことにしていたので、両方を直した
   const c = { year: 1, month: 11 };
   assert.equal(advanceMonths(c, 1).month, 12);
-  const next = advanceMonths(c, 3);
-  assert.equal(next.month, 2);
-  assert.equal(next.year, 2);
+
+  const jan = advanceMonths(c, 2);
+  assert.equal(jan.month, 1);
+  assert.equal(jan.year, 1, '1月で年度が変わってはいけない');
+});
+
+test('3月から4月へまたぐと年度が変わる', () => {
+  const march = { year: 1, month: 3 };
+  const april = advanceMonths(march, 1);
+  assert.equal(april.month, 4);
+  assert.equal(april.year, 2);
+});
+
+test('12か月進めるとちょうど1年後の同じ月になる', () => {
+  for (const month of [4, 7, 12, 1, 3]) {
+    const after = advanceMonths({ year: 2, month }, 12);
+    assert.equal(after.month, month);
+    assert.equal(after.year, 3, `${month}月から1年進めたら年度が1つだけ進むはず`);
+  }
 });
 
 test('日付の表示が出る', () => {
@@ -350,4 +371,78 @@ test('支度金を払えなければ雇えない', () => {
   const poor = { ...newCompany(), funds: 100, applicants: [candidate] };
   assert.equal(canHire(poor, candidate), false);
   assert.equal(hire(poor, candidate).staff.length, poor.staff.length);
+});
+
+// --- 年度末の決算 ---
+
+test('年度をまたぐと settle が知らせる', () => {
+  const march = { ...newCompany(), year: 1, month: 3 };
+  const result = settle(march, { client: 'X', size: 'small', months: 1, reward: 900 }, 900);
+  assert.equal(result.yearEnded, true);
+  assert.equal(result.company.year, 2);
+});
+
+test('年度内に収まる案件では知らせない', () => {
+  const april = { ...newCompany(), year: 1, month: 4 };
+  const result = settle(april, { client: 'X', size: 'small', months: 2, reward: 900 }, 900);
+  assert.equal(result.yearEnded, false);
+});
+
+test('決算はその年度の案件だけを集計する', () => {
+  const base = newCompany();
+  const company = {
+    ...base,
+    year: 2,
+    history: [
+      { client: 'A', size: 'small', payout: 900, cost: 400, funds: 0, year: 1 },
+      { client: 'B', size: 'medium', payout: 2000, cost: 1000, funds: 0, year: 2 },
+      { client: 'C', size: 'small', payout: 800, cost: 500, funds: 0, year: 2 },
+    ],
+    yearStart: { ...snapshotYear(base), year: 2 },
+  };
+
+  const summary = yearSummary(company);
+  assert.equal(summary.count, 2, '前の年度ぶんまで数えている');
+  assert.equal(summary.payout, 2800);
+  assert.equal(summary.cost, 1500);
+  assert.equal(summary.profit, 1300);
+});
+
+test('決算には、その年度に育った人が出る', () => {
+  const base = newCompany();
+  const start = snapshotYear(base);
+  const grownStaff = base.staff.map((s, i) => ({ ...s, level: i === 0 ? 5 : s.level }));
+  const summary = yearSummary({ ...base, staff: grownStaff, yearStart: start });
+
+  assert.equal(summary.grown.length, 1);
+  assert.equal(summary.grown[0].from, 1);
+  assert.equal(summary.grown[0].to, 5);
+});
+
+test('育っていない年は、その欄が空になる', () => {
+  const base = newCompany();
+  assert.deepEqual(yearSummary({ ...base, yearStart: snapshotYear(base) }).grown, []);
+});
+
+test('決算のひとことは、儲かり方で変わる', () => {
+  const base = newCompany();
+  const summarize = (payout, cost) =>
+    yearSummary({
+      ...base,
+      history: [{ client: 'A', size: 'small', payout, cost, funds: 0, year: 1 }],
+      yearStart: snapshotYear(base),
+    }).title;
+
+  assert.match(summarize(100, 900), /赤字/);
+  assert.notEqual(summarize(9000, 900), summarize(1000, 900));
+  // 1件も受けなかった年も、ちゃんと言葉が出る
+  assert.match(yearSummary({ ...base, history: [], yearStart: snapshotYear(base) }).title, /受けなかった/);
+});
+
+test('年度を締めると基準が置き直され、翌年の集計に前年が混ざらない', () => {
+  const base = { ...newCompany(), year: 2, funds: 5000 };
+  const closed = closeYear(base);
+  assert.equal(closed.yearStart.year, 2);
+  assert.equal(closed.yearStart.funds, 5000);
+  assert.equal(yearSummary(closed).count, 0);
 });

@@ -42,6 +42,8 @@ import {
   hire,
   serialize,
   deserialize,
+  yearSummary,
+  closeYear,
 } from './company.js';
 
 // --- 演出のつまみ（手触りはここで変わる） ---
@@ -66,6 +68,7 @@ for (const id of [
   'develop', 'stage', 'progress-bar', 'stats',
   'result', 'result-headline', 'result-sales', 'reviews', 'affinity-hint',
   'settle', 'growth', 'again',
+  'yearend', 'yearend-title', 'yearend-headline', 'yearend-rows', 'yearend-grown', 'yearend-next',
   'gameover', 'gameover-detail', 'restart',
 ]) {
   el[id] = document.getElementById(id);
@@ -444,9 +447,13 @@ function showResult() {
  * 入金と人件費をまとめて出す。
  * 別々に見せると「儲かったのかどうか」が分からなくなるので、差引まで並べる。
  */
+/** 年度をまたいだかどうか。結果画面のあとに決算を出すために覚えておく */
+let yearEnded = false;
+
 function applySettlement(offer, payout, rejected = false) {
   const result = settle(company, offer, payout);
   company = result.company;
+  yearEnded = result.yearEnded;
 
   el.settle.innerHTML = '';
   const cond = findCondition(offer.condition);
@@ -561,6 +568,67 @@ function applyGrowth() {
 
 // --- 次へ・倒産 ---
 
+/**
+ * 年度末の決算を出す。
+ * 月は進んでいるのに節目が何も無いと、長く遊ぶほど平板になる。
+ */
+function showYearEnd() {
+  const summary = yearSummary(company);
+  company = closeYear(company);
+  save();
+
+  el['yearend-title'].textContent = `${summary.year}年目 決算`;
+  el['yearend-headline'].textContent = summary.title;
+
+  el['yearend-rows'].innerHTML = '';
+  const rows = [
+    { label: '受けた案件', value: `${summary.count}件` },
+    { label: '売上', value: `${summary.payout.toLocaleString()}万` },
+    { label: '人件費', value: `−${summary.cost.toLocaleString()}万` },
+    {
+      label: '差引',
+      value: `${summary.profit >= 0 ? '+' : ''}${summary.profit.toLocaleString()}万`,
+      total: true,
+    },
+    { label: '資金', value: `${summary.fundsAfter.toLocaleString()}万`, total: true },
+  ];
+  if (summary.hired > 0) rows.push({ label: '入社', value: `${summary.hired}人` });
+  if (summary.discovered > 0) {
+    rows.push({ label: '見つけた組み合わせ', value: `${summary.discovered}通り` });
+  }
+
+  for (const row of rows) {
+    const div = document.createElement('div');
+    div.className = `settle-row${row.total ? ' total' : ''}`;
+    const label = document.createElement('span');
+    label.textContent = row.label;
+    const value = document.createElement('span');
+    value.textContent = row.value;
+    div.append(label, value);
+    el['yearend-rows'].appendChild(div);
+  }
+
+  // 稼ぎより、人が変わったことのほうが「続けている実感」になる
+  el['yearend-grown'].innerHTML = '';
+  if (summary.grown.length === 0) {
+    const none = document.createElement('div');
+    none.className = 'yearend-grown-row';
+    none.textContent = 'ことしは 誰も レベルが上がらなかった';
+    el['yearend-grown'].appendChild(none);
+  } else {
+    for (const person of summary.grown) {
+      const row = document.createElement('div');
+      row.className = 'yearend-grown-row';
+      row.innerHTML = `<span>${person.emoji}</span><span class="grow-name"></span><b>Lv.${person.from} → ${person.to}</b>`;
+      row.querySelector('.grow-name').textContent = person.name;
+      el['yearend-grown'].appendChild(row);
+    }
+  }
+
+  el.result.hidden = true;
+  el.yearend.hidden = false;
+}
+
 function nextProject() {
   if (company.bankrupt) {
     el.result.hidden = true;
@@ -568,6 +636,13 @@ function nextProject() {
       `${dateLabel(company)}・${company.projects}件で力尽きました。` +
       `社員は${company.staff.length}人いました。`;
     el.gameover.hidden = false;
+    return;
+  }
+
+  // 年度をまたいでいたら、先に決算を見せる
+  if (yearEnded) {
+    yearEnded = false;
+    showYearEnd();
     return;
   }
 
@@ -581,6 +656,15 @@ function nextProject() {
   renderSetup();
 }
 
+el['yearend-next'].addEventListener('click', () => {
+  company = withOffers(company);
+  picked = { offerId: null, techId: null, staffIds: [] };
+  save();
+  el.yearend.hidden = true;
+  el.setup.hidden = false;
+  renderSetup();
+});
+
 el.start.addEventListener('click', startDevelopment);
 el.again.addEventListener('click', nextProject);
 el.restart.addEventListener('click', () => {
@@ -590,6 +674,7 @@ el.restart.addEventListener('click', () => {
   picked = { offerId: null, techId: null, staffIds: [] };
   save();
   el.gameover.hidden = true;
+  el.yearend.hidden = true;
   el.result.hidden = true;
   el.develop.hidden = true;
   el.setup.hidden = false;

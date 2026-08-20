@@ -126,6 +126,22 @@
       .cond-nurture { color: var(--pop); }
       .cond-strict { color: var(--accent); }
 
+      /* --- 年度末の決算 --- */
+      #yearend { display: grid; gap: 12px; text-align: center; }
+
+      #yearend-title { margin: 0; font-size: 15px; color: var(--muted); letter-spacing: 0.1em; }
+      #yearend-headline { margin: 0; font-size: 24px; font-weight: 900; }
+
+      #yearend-rows { display: grid; gap: 4px; text-align: left; }
+      #yearend-grown { display: grid; gap: 4px; text-align: left; }
+
+      .yearend-grown-row {
+        display: flex; align-items: center; gap: 8px;
+        background: var(--panel-hi); border-radius: 6px;
+        padding: 6px 12px; font-size: 13px;
+      }
+      .yearend-grown-row b { color: var(--accent); font-variant-numeric: tabular-nums; }
+
       /* --- 精算 --- */
       #settle { display: grid; gap: 4px; text-align: left; }
       .settle-row {
@@ -354,7 +370,17 @@
         <button class="sub" id="again" type="button">つぎの案件へ</button>
       </section>
 
-      <!-- ④ 倒産 -->
+      <!-- ④ 年度末の決算 -->
+      <section id="yearend" class="panel" hidden>
+        <h2 id="yearend-title"></h2>
+        <div id="yearend-headline"></div>
+        <div id="yearend-rows"></div>
+        <div class="label" style="text-align: left; margin-top: 4px">ことしの成長</div>
+        <div id="yearend-grown"></div>
+        <button class="main" id="yearend-next" type="button">つぎの年度へ</button>
+      </section>
+
+      <!-- ⑤ 倒産 -->
       <section id="gameover" class="panel" hidden style="text-align: center; display: grid; gap: 12px">
         <h2 style="margin: 0; font-size: 22px">資金が尽きました</h2>
         <div id="gameover-detail" style="font-size: 13px; color: var(--muted)"></div>

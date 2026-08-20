@@ -219,6 +219,14 @@ export function createCompany(staffFactory, seed) {
     projects: 0,
     history: [],
     bankrupt: false,
+    // 年度のはじまりの控え。決算で差分を出すのに使う
+    yearStart: {
+      year: 1,
+      funds: STARTING_FUNDS,
+      levels: Object.fromEntries(FOUNDING_STAFF.map((id) => [id, 1])),
+      staffCount: FOUNDING_STAFF.length,
+      discovered: 0,
+    },
   };
 }
 
@@ -258,15 +266,27 @@ export function dateLabel(company) {
   return `${company.year}年目 ${company.month}月`;
 }
 
-/** 月を進める。会計年度は4月はじまり */
+// 年と月をそのまま足し引きすると、会計年度の切り替わりを間違えやすい。
+// 「開始からの通算月数」に直してから計算し、最後に戻す。
+//
+// 実際、最初の実装は1月で年が変わっていた（会計年度は4月はじまりなのに）。
+
+/** 1年目4月 を 0 とする通算月数にする */
+function toAbsoluteMonth(year, month) {
+  return (year - 1) * 12 + (((month - FISCAL_START_MONTH) % 12) + 12) % 12;
+}
+
+/** 通算月数から年度と月に戻す */
+function fromAbsoluteMonth(absolute) {
+  const year = Math.floor(absolute / 12) + 1;
+  const month = (((absolute % 12) + FISCAL_START_MONTH - 1) % 12) + 1;
+  return { year, month };
+}
+
+/** 月を進める。会計年度は4月はじまりなので、3月→4月 で年度が変わる */
 export function advanceMonths(company, months) {
-  let year = company.year;
-  let month = company.month + months;
-  while (month > 12) {
-    month -= 12;
-    if (month >= FISCAL_START_MONTH || company.month <= 12) year += 1;
-  }
-  return { ...company, year, month };
+  const absolute = toAbsoluteMonth(company.year, company.month) + months;
+  return { ...company, ...fromAbsoluteMonth(absolute) };
 }
 
 /**
@@ -287,13 +307,84 @@ export function settle(company, offer, payout) {
       bankrupt: funds < 0,
       history: [
         ...company.history,
-        { client: offer.client, size: offer.size, payout, cost, funds },
+        // year を残すのは、年度末に「その年ぶん」だけを集計するため
+        { client: offer.client, size: offer.size, payout, cost, funds, year: company.year },
       ],
     },
     offer.months,
   );
 
-  return { company: settled, payout, cost, profit: payout - cost };
+  return {
+    company: settled,
+    payout,
+    cost,
+    profit: payout - cost,
+    // 3月をまたいだかどうか。画面はこれを見て決算を出す
+    yearEnded: settled.year > company.year,
+  };
+}
+
+// --- 年度末の決算 ---
+//
+// 月は進んでいるのに節目が何も無いと、長く遊ぶほど平板になる。
+// 1年ぶんをまとめて振り返れると、時間が流れていることに意味が出る。
+
+/** いまの年度のはじまりを控える。差分を出すための基準になる */
+export function snapshotYear(company) {
+  return {
+    year: company.year,
+    funds: company.funds,
+    levels: Object.fromEntries(company.staff.map((s) => [s.id, s.level])),
+    staffCount: company.staff.length,
+    discovered: Object.keys(company.discovered ?? {}).length,
+  };
+}
+
+/**
+ * 1年ぶんの成績をまとめる。
+ * 数字だけでなく「誰が育ったか」を出すのが肝で、
+ * 稼ぎより人の変化のほうが、続けている実感になる。
+ */
+export function yearSummary(company) {
+  const start = company.yearStart ?? snapshotYear(company);
+  const projects = (company.history ?? []).filter((h) => h.year === start.year);
+
+  const payout = projects.reduce((sum, p) => sum + p.payout, 0);
+  const cost = projects.reduce((sum, p) => sum + p.cost, 0);
+
+  // 途中で入った人は基準が無いので、レベル1から数える
+  const grown = company.staff
+    .map((s) => ({ name: s.name, emoji: s.emoji, from: start.levels[s.id] ?? 1, to: s.level }))
+    .filter((g) => g.to > g.from);
+
+  return {
+    year: start.year,
+    count: projects.length,
+    payout,
+    cost,
+    profit: payout - cost,
+    fundsBefore: start.funds,
+    fundsAfter: company.funds,
+    hired: company.staff.length - start.staffCount,
+    grown,
+    discovered: Object.keys(company.discovered ?? {}).length - start.discovered,
+    title: yearTitle(payout - cost, projects.length),
+  };
+}
+
+/** 年度の総括をひとことで。点数より、どんな1年だったかが伝わる言葉にする */
+function yearTitle(profit, count) {
+  if (count === 0) return '何も受けなかった1年';
+  if (profit < 0) return '赤字の1年';
+  if (profit < 500) return '食いつないだ1年';
+  if (profit < 2000) return 'まずまずの1年';
+  if (profit < 5000) return '波に乗った1年';
+  return '大きく伸びた1年';
+}
+
+/** 年度を締めて、次の年度の基準を置き直す */
+export function closeYear(company) {
+  return { ...company, yearStart: snapshotYear(company) };
 }
 
 /**

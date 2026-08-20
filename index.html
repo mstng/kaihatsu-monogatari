@@ -3,19 +3,34 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#101820" />
+    <meta name="theme-color" content="#8ecae6" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- 丸ゴシック。カイロソフト系の見た目はドット絵フォントではなく、
+         角の丸い太めのゴシックに近い。漢字が多い日本語でも読みやすい -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;800&display=swap"
+      rel="stylesheet"
+    />
     <title>開発会社物語 — 受けて、つくって、育てる</title>
     <style>
       :root {
-        --bg: #101820;
-        --panel: #182430;
-        --panel-hi: #21303f;
-        --line: #2f4356;
-        --text: #eaf2f8;
-        --muted: #8ba3ba;
-        --accent: #ffcb47;
-        --pop: #7fe3a0;
-        --crit: #ff8a5c;
+        /* カイロソフト系の見た目に寄せた配色。
+           暗いフラットUIだと「経営シム」ではなく「ツール」に見えるので、
+           空・芝・クリーム色の明るい面で組み直している */
+        --sky: #8ecae6;
+        --sky-deep: #62b0d4;
+        --ground: #a8d55d;
+        --bg: #f3e9d2;
+        --panel: #fffdf5;
+        --panel-hi: #ffeec2;
+        --line: #6b4a2f;
+        --line-soft: #b99b72;
+        --text: #3b2f22;
+        --muted: #8a7862;
+        --accent: #f4820b;
+        --pop: #2f9e44;
+        --crit: #d64545;
       }
 
       * { box-sizing: border-box; }
@@ -24,24 +39,33 @@
       body {
         margin: 0;
         padding: calc(18px + env(safe-area-inset-top)) 14px calc(24px + env(safe-area-inset-bottom));
-        background: var(--bg);
+        /* 上が空、下に向かってクリーム。屋外から社内へ、という奥行きを出す */
+        background: linear-gradient(180deg, var(--sky) 0%, var(--sky) 90px, var(--bg) 200px);
+        background-attachment: fixed;
         color: var(--text);
-        font-family: system-ui, -apple-system, 'Hiragino Sans', sans-serif;
-        font-size: 14px;
+        font-family: 'M PLUS Rounded 1c', system-ui, 'Hiragino Maru Gothic ProN', sans-serif;
+        font-weight: 500;
+        font-size: 15px;
+        line-height: 1.6;
       }
 
       main { max-width: 480px; margin: 0 auto; display: grid; gap: 12px; }
 
       h1 {
-        font-size: 14px; font-weight: 700; letter-spacing: 0.12em;
-        color: var(--muted); text-align: center; margin: 0;
+        font-size: 21px; font-weight: 800; letter-spacing: 0.16em;
+        color: #fffdf5; text-align: center; margin: 0;
+        /* 縁取り文字。ドット絵の看板っぽさが出る */
+        text-shadow: 2px 2px 0 var(--line), -1px -1px 0 var(--line),
+                     1px -1px 0 var(--line), -1px 1px 0 var(--line);
       }
 
+      /* 角丸を減らし、影をぼかさない。これだけで「箱」らしさが出る */
       .panel {
         background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 12px;
+        border: 3px solid var(--line);
+        border-radius: 8px;
         padding: 14px;
+        box-shadow: 0 4px 0 var(--line);
       }
 
       .label { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
@@ -49,23 +73,32 @@
       /* --- 選択肢 --- */
       .choices { display: flex; gap: 6px; flex-wrap: wrap; }
 
+      /* 押し込める見た目にする。影を消して1px下げると「押した」感じが出る */
       .choice {
         flex: 1 1 auto;
         min-width: 92px;
         padding: 10px 8px;
         background: var(--panel-hi);
-        border: 1px solid var(--line);
-        border-radius: 10px;
+        border: 2px solid var(--line);
+        border-radius: 6px;
+        box-shadow: 0 3px 0 var(--line-soft);
         color: var(--text);
         font-family: inherit;
-        font-size: 13px;
+        font-size: 14px;
         cursor: pointer;
         text-align: center;
+        transition: transform 0.06s, box-shadow 0.06s;
+      }
+
+      .choice:active {
+        transform: translateY(3px);
+        box-shadow: none;
       }
 
       .choice[aria-pressed='true'] {
+        background: var(--panel-hi);
         border-color: var(--accent);
-        background: #2c3a2a;
+        box-shadow: 0 3px 0 var(--accent), inset 0 0 0 2px var(--accent);
       }
 
       .choice-emoji { display: block; font-size: 20px; }
@@ -106,7 +139,14 @@
         border-radius: 10px; color: var(--text);
         font-family: inherit; font-size: 13px; cursor: pointer;
       }
-      .offer[aria-pressed='true'] { border-color: var(--accent); background: #2c3a2a; }
+      /* 選択は「反転」ではなく「強調」にする。
+         塗りつぶすと、中の文字色を一つずつ上書きする羽目になり、
+         どれかを取りこぼした瞬間に読めなくなる */
+      .offer[aria-pressed='true'] {
+        border-color: var(--accent);
+        background: var(--panel-hi);
+        box-shadow: inset 0 0 0 2px var(--accent);
+      }
       .offer:disabled { opacity: 0.35; cursor: not-allowed; }
 
       .offer-top { display: flex; align-items: baseline; gap: 8px; }
@@ -120,7 +160,8 @@
       .offer-tag {
         font-size: 11px; font-weight: 700;
         padding: 4px 8px; border-radius: 6px;
-        background: #0e1620;
+        background: var(--bg);
+        border: 2px solid var(--line-soft);
       }
       .cond-rush { color: var(--crit); }
       .cond-nurture { color: var(--pop); }
@@ -155,22 +196,65 @@
       .settle-row .minus { color: var(--crit); }
 
       /* --- 開発中の舞台。ここが今回の主役 --- */
+      /* 開発中の舞台。ただの暗い箱ではなく「オフィスの一室」に見せる。
+         壁と床をCSSだけで描き、床はタイル目地を引いて奥行きを出す */
       #stage {
         position: relative;
-        height: 190px;
-        background: linear-gradient(180deg, #16222e, #101820);
-        border: 1px solid var(--line);
-        border-radius: 12px;
+        height: 210px;
+        border: 3px solid var(--line);
+        border-radius: 8px;
+        box-shadow: 0 4px 0 var(--line);
         overflow: hidden;
+        background:
+          /* 床のタイル */
+          repeating-linear-gradient(90deg, #d9b98a 0 38px, #cdaa79 38px 40px) 0 96px / 100% 114px no-repeat,
+          /* 床の下地 */
+          linear-gradient(180deg, #cdaa79, #bf9a68) 0 96px / 100% 114px no-repeat,
+          /* 壁の腰板 */
+          linear-gradient(180deg, #e8d9b5 0 88px, #b98f5f 88px 96px) 0 0 / 100% 96px no-repeat,
+          var(--panel);
+      }
+
+      /* 壁に貼った窓。外の空が見えると「室内」だと一目で分かる */
+      #stage::before {
+        content: '';
+        position: absolute;
+        left: 14px; top: 14px;
+        width: 74px; height: 52px;
+        background: linear-gradient(180deg, var(--sky), #cfe9f5);
+        border: 3px solid var(--line);
+        border-radius: 4px;
+        box-shadow: inset 0 0 0 2px #fffdf5;
+      }
+
+      /* 壁のホワイトボード */
+      #stage::after {
+        content: '';
+        position: absolute;
+        right: 14px; top: 18px;
+        width: 66px; height: 44px;
+        background: #fffdf5;
+        border: 3px solid var(--line);
+        border-radius: 3px;
       }
 
       .desk {
         position: absolute;
-        bottom: 26px;
+        bottom: 22px;
         display: grid;
         justify-items: center;
-        gap: 2px;
+        gap: 0;
         width: 33%;
+      }
+
+      /* 机。キャラの足元に置くと、床に座って働いている絵になる */
+      .desk-table {
+        width: 62px; height: 12px;
+        background: #8b5e34;
+        border: 3px solid var(--line);
+        border-radius: 3px;
+        margin-top: -6px;
+        box-shadow: 0 3px 0 rgba(0, 0, 0, 0.18);
       }
 
       .desk-emoji {
@@ -187,7 +271,11 @@
         50% { transform: translateY(-3px) rotate(2deg); }
       }
 
-      .desk-name { font-size: 11px; color: var(--muted); }
+      .desk-name {
+        font-size: 12px; color: var(--text); margin-top: 3px;
+        background: var(--panel); padding: 0 6px;
+        border: 2px solid var(--line); border-radius: 99px;
+      }
 
       /* 飛ぶ数字。これを気持ちよくするのが段階1の目的 */
       .pop {
@@ -197,7 +285,9 @@
         color: var(--pop);
         pointer-events: none;
         white-space: nowrap;
-        text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+        /* 明るい床の上でも読めるように、影ではなく縁取りにする */
+        text-shadow: 2px 2px 0 #fffdf5, -2px -2px 0 #fffdf5,
+                     2px -2px 0 #fffdf5, -2px 2px 0 #fffdf5;
         animation: float-up 0.9s ease-out forwards;
       }
 
@@ -214,11 +304,13 @@
 
       /* --- 進捗 --- */
       .track {
-        height: 8px; background: #0a1119; border-radius: 99px; overflow: hidden;
+        height: 8px; background: var(--bg); border: 2px solid var(--line-soft);
+        border-radius: 99px; overflow: hidden;
       }
       #progress-bar {
         height: 100%; width: 0%; background: var(--accent); transition: width 0.15s linear;
       }
+      .track { border: 2px solid var(--line); background: var(--panel-hi); height: 12px; }
 
       /* --- 4指標 --- */
       #stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
@@ -243,25 +335,31 @@
 
       /* --- ボタン --- */
       button.main {
-        width: 100%; padding: 16px;
-        font-family: inherit; font-size: 16px; font-weight: 800;
-        background: var(--accent); color: #23180a;
-        border: none; border-radius: 10px; cursor: pointer;
+        width: 100%; padding: 15px;
+        font-family: inherit; font-weight: 800; font-size: 18px; letter-spacing: 0.08em;
+        background: var(--accent); color: #fffdf5;
+        border: 3px solid var(--line); border-radius: 8px; cursor: pointer;
+        box-shadow: 0 5px 0 var(--line);
+        text-shadow: 1px 1px 0 #a35606;
         touch-action: manipulation; -webkit-user-select: none; user-select: none;
+        transition: transform 0.06s, box-shadow 0.06s;
       }
-      button.main:disabled { opacity: 0.4; cursor: not-allowed; }
+      button.main:active:not(:disabled) { transform: translateY(5px); box-shadow: none; }
+      button.main:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: 0 5px 0 var(--line-soft); }
 
       button.sub {
         width: 100%; padding: 12px;
-        font-family: inherit; font-size: 13px; font-weight: 600;
+        font-family: inherit; font-size: 15px;
         background: var(--panel-hi); color: var(--text);
-        border: 1px solid var(--line); border-radius: 10px; cursor: pointer;
+        border: 3px solid var(--line); border-radius: 8px; cursor: pointer;
+        box-shadow: 0 4px 0 var(--line-soft);
       }
+      button.sub:active { transform: translateY(4px); box-shadow: none; }
 
       /* --- 結果 --- */
       #result { display: grid; gap: 12px; text-align: center; }
 
-      #result-headline { font-size: 26px; font-weight: 900; margin: 0; }
+      #result-headline { font-size: 26px; font-weight: 800; margin: 0; }
       #result-sales { font-size: 15px; color: var(--accent); font-weight: 700; }
 
       .review {
@@ -304,7 +402,7 @@
       .grow-row.levelup { border: 1px solid var(--accent); }
       .grow-row.levelup .grow-level { font-size: 15px; }
 
-      .grow-track { height: 5px; background: #0a1119; border-radius: 99px; overflow: hidden; }
+      .grow-track { height: 6px; background: var(--bg); border: 1px solid var(--line-soft); border-radius: 99px; overflow: hidden; }
       .grow-fill { height: 100%; background: var(--pop); }
 
       .grow-skill {

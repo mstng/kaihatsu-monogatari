@@ -323,11 +323,15 @@ function buildStage() {
     emoji.className = 'desk-emoji working';
     emoji.textContent = staff.emoji;
 
+    // 机を足元に置く。人が浮いていると「オフィス」に見えない
+    const table = document.createElement('span');
+    table.className = 'desk-table';
+
     const name = document.createElement('span');
     name.className = 'desk-name';
     name.textContent = staff.name;
 
-    desk.append(emoji, name);
+    desk.append(emoji, table, name);
     el.stage.appendChild(desk);
     deskOf.set(staff.id, { left, emoji });
   });

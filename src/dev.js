@@ -261,6 +261,62 @@ export function affinityOf(genreId, techId) {
   return AFFINITY[genreId]?.[techId] ?? 'normal';
 }
 
+/**
+ * 依頼の性格。
+ *
+ * 規模ちがいの3件が並ぶだけだと「大きいのを取れる時に取る」で終わり、
+ * 選ぶ判断が薄い。効き方の軸をずらした条件を混ぜて、
+ * 「稼ぐか、育てるか、勝負するか」を選ばせる。
+ *
+ * rewardMul と monthsDelta は依頼を作るときに数字へ焼き込む（画面には結果だけ出す）。
+ * pivotMul（評価のきびしさ）と expMul（育ちやすさ）は、あとで参照する。
+ */
+export const CONDITIONS = {
+  rush: {
+    key: 'rush',
+    emoji: '⚡',
+    label: '特急',
+    describe: '期間が1か月みじかい。人件費は浮くが、評価がひくいと減額',
+    // 報酬まで上げると「短い・安い・高い」の三拍子になり、選ばない理由が無くなる。
+    // うまみは人件費が浮くことだけ
+    rewardMul: 1.0,
+    monthsDelta: -1,
+    pivotMul: 1.15,
+    expMul: 1,
+    // 合格ライン。倍率をいじるだけでは外したときの傷が浅く、
+    // 結局どの条件も得になっていた。線を引いて崖を作る
+    minScoreRatio: 0.45,
+    penaltyMul: 0.6,
+  },
+  nurture: {
+    key: 'nurture',
+    emoji: '🌱',
+    label: '育成枠',
+    describe: '報酬は安いが、メンバーがよく育つ',
+    rewardMul: 0.7,
+    monthsDelta: 0,
+    pivotMul: 1,
+    expMul: 2,
+  },
+  strict: {
+    key: 'strict',
+    emoji: '🔬',
+    label: 'きびしい客',
+    describe: '報酬はとても高いが、評価がひくいと大きく減額',
+    rewardMul: 1.6,
+    monthsDelta: 0,
+    pivotMul: 1.25,
+    expMul: 1,
+    // 見抜けていれば大勝ち、外すと大負け。振れ幅は合格ラインで作る
+    minScoreRatio: 0.6,
+    penaltyMul: 0.45,
+  },
+};
+
+export function findCondition(key) {
+  return key ? (CONDITIONS[key] ?? null) : null;
+}
+
 /** 依頼元。実在の企業と紛らわしくならない、それっぽい架空の名前にする */
 const CLIENTS = [
   'さくら商事',
@@ -298,6 +354,17 @@ export function generateOffers(seed, count = 3) {
     const rewardRoll = nextRandom(s);
     s = rewardRoll.seed;
 
+    // 条件は6割の依頼に付く。全部に付けると「ふつうの仕事」が無くなり、
+    // かえって特別感が消える
+    const conditionRoll = nextRandom(s);
+    s = conditionRoll.seed;
+    const keys = Object.keys(CONDITIONS);
+    const condition =
+      conditionRoll.value < 0.6 ? CONDITIONS[keys[Math.floor(conditionRoll.value * 10) % keys.length]] : null;
+
+    // 報酬は ±15% ゆらす。同じ規模でも当たり外れが出るように
+    const baseReward = size.reward * (0.85 + rewardRoll.value * 0.3);
+
     offers.push({
       id: `offer${i}`,
       client: CLIENTS[clientRoll.value],
@@ -305,10 +372,11 @@ export function generateOffers(seed, count = 3) {
       size: size.key,
       label: size.label,
       workCount: size.workCount,
-      months: size.months,
+      // 期間は最低1か月。特急でも0か月にはしない
+      months: Math.max(1, size.months + (condition?.monthsDelta ?? 0)),
       teamSize: size.teamSize,
-      // 報酬は ±15% ゆらす。同じ規模でも当たり外れが出るように
-      reward: Math.round(size.reward * (0.85 + rewardRoll.value * 0.3)),
+      condition: condition?.key ?? null,
+      reward: Math.round(baseReward * (condition?.rewardMul ?? 1)),
     });
   }
 
@@ -457,8 +525,10 @@ export function review(state) {
   );
 
   // 基準は作業回数に比例させる。固定にすると、
-  // 作業回数の多い大型案件が自動的に高評価になってしまう
-  const pivot = SCORE_PIVOT * (state.workCount / WORK_COUNT);
+  // 作業回数の多い大型案件が自動的に高評価になってしまう。
+  // 依頼の条件（特急・きびしい客）は、この基準を引き上げる形で効かせる
+  const condition = findCondition(state.offer?.condition);
+  const pivot = SCORE_PIVOT * (state.workCount / WORK_COUNT) * (condition?.pivotMul ?? 1);
 
   let s = state.seed;
   const reviews = [];
@@ -482,9 +552,16 @@ export function review(state) {
   // 下限を 0.1 と低く置いているのは、評価が低いと赤字になるようにするため。
   // 下限が人件費を上回っていると、何をしても黒字になり、資金に意味が無くなる
   // （最初は 0.6 にしていて、どんな作り方をしても儲かる状態になっていた）。
+  // 条件つきの依頼には合格ラインがある。下回ると減額される。
+  // 倍率の上げ下げだけでは「外しても大して痛くない」ままで、
+  // どの条件も結局は得、という状態になっていた。崖を作って初めて博打になる
+  const ratio = scoreSum / maxSum;
+  const rejected = condition?.minScoreRatio != null && ratio < condition.minScoreRatio;
+  const penalty = rejected ? condition.penaltyMul : 1;
+
   const payout = state.offer
-    ? Math.round(state.offer.reward * (0.1 + (scoreSum / maxSum) * 1.0))
-    : Math.round(total * 3 * (0.5 + scoreSum / maxSum));
+    ? Math.round(state.offer.reward * (0.1 + ratio) * penalty)
+    : Math.round(total * 3 * (0.5 + ratio));
 
   return {
     total,
@@ -494,6 +571,10 @@ export function review(state) {
     maxSum,
     sales: payout,
     payout,
+    // 減額されたかどうかは必ず伝える。黙って減らすと、
+    // なぜ儲からなかったのかが分からず、次の判断につながらない
+    rejected,
+    condition: condition?.key ?? null,
     affinity: affinityOf(state.genreId, state.techId),
     hit: scoreSum >= maxSum * 0.75,
   };

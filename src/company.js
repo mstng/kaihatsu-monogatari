@@ -126,7 +126,7 @@ export function levelMultiplier(staff) {
  * 起きたことを配列で返すのは、画面が順番に演出できるようにするため
  * （レベルアップを1件ずつ出したい）。dev.js の work() と同じ考え方。
  */
-export function grow(staffList, contribution, seed) {
+export function grow(staffList, contribution, seed, expMultiplier = 1) {
   let s = seed >>> 0;
   const events = [];
 
@@ -141,7 +141,8 @@ export function grow(staffList, contribution, seed) {
     // 自分のぶんの「教え上手」は自分には効かない（自分で自分を教えられない）
     const own = skillEffects(staff).mentor;
     const bonus = Math.max(0, mentorBonus - own);
-    const gained = Math.round(raw * EXP_RATE * (1 + bonus));
+    // expMultiplier は依頼の条件（育成枠）ぶん。報酬を捨てて人を育てる選択になる
+    const gained = Math.round(raw * EXP_RATE * (1 + bonus) * expMultiplier);
 
     let next = { ...staff, exp: (staff.exp ?? 0) + gained, skills: [...(staff.skills ?? [])] };
     events.push({ type: 'exp', staffId: staff.id, amount: gained });

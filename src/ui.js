@@ -23,6 +23,7 @@ import {
   generateOffers,
   generateCandidate,
   talentStars,
+  findCondition,
 } from './dev.js';
 import {
   grow,
@@ -172,6 +173,16 @@ function renderSetup() {
       : `${SIZES[offer.size].label} ・ ${offer.teamSize}人ひつよう（いまは${company.staff.length}人）`;
 
     button.append(top, sub);
+
+    // 条件つきの依頼は、何が違うのかをその場に書く。
+    // 印だけ出して意味を覚えさせるのは、説明を読ませるのと同じことになる
+    const condition = findCondition(offer.condition);
+    if (condition) {
+      const tag = document.createElement('div');
+      tag.className = `offer-tag cond-${condition.key}`;
+      tag.textContent = `${condition.emoji} ${condition.label}：${condition.describe}`;
+      button.appendChild(tag);
+    }
     button.addEventListener('click', () => {
       picked.offerId = offer.id;
       // 必要人数が変わるので、選び直してもらう
@@ -422,7 +433,7 @@ function showResult() {
   company = remember(company, state.genreId, state.techId, result.affinity);
 
   applyGrowth();
-  applySettlement(offer, result.payout);
+  applySettlement(offer, result.payout, result.rejected);
 
   el.develop.hidden = true;
   el.result.hidden = false;
@@ -433,13 +444,21 @@ function showResult() {
  * 入金と人件費をまとめて出す。
  * 別々に見せると「儲かったのかどうか」が分からなくなるので、差引まで並べる。
  */
-function applySettlement(offer, payout) {
+function applySettlement(offer, payout, rejected = false) {
   const result = settle(company, offer, payout);
   company = result.company;
 
   el.settle.innerHTML = '';
+  const cond = findCondition(offer.condition);
   const rows = [
-    { label: `入金（${offer.client}）`, value: result.payout, sign: 'plus' },
+    {
+      // 減額されたなら、その場で理由まで書く。数字だけ小さいと理不尽に見える
+      label: rejected
+        ? `入金（${offer.client}）※${cond?.label ?? ''}の基準に届かず減額`
+        : `入金（${offer.client}）`,
+      value: result.payout,
+      sign: 'plus',
+    },
     { label: `人件費 ${offer.months}か月ぶん`, value: -result.cost, sign: 'minus' },
     {
       label: '差引',
@@ -471,7 +490,9 @@ function applySettlement(offer, payout) {
  * 1件ずつ順に浮かび上がらせるのは、まとめて出すと「育った」感じが流れるため。
  */
 function applyGrowth() {
-  const result = grow(company.staff, state.contribution, company.seed);
+  // 育成枠なら経験値が増える。報酬を捨てて人を育てた見返りがここに出る
+  const condition = findCondition(state.offer?.condition);
+  const result = grow(company.staff, state.contribution, company.seed, condition?.expMul ?? 1);
   company = { ...company, staff: result.staff, seed: result.seed };
 
   const byStaff = new Map();

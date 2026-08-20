@@ -27,6 +27,8 @@ import {
   talentStars,
   TALENT_RANGE,
   SIZES,
+  CONDITIONS,
+  findCondition,
 } from '../src/dev.js';
 
 /** 社員の実体を作る。startProject は ID ではなく実体を受け取る（レベルとスキルを見るため） */
@@ -336,4 +338,92 @@ test('どの技術も、どこかのジャンルでは活きる（死に技術�
       `${tech.name} が どのジャンルでも活きない`,
     );
   }
+});
+
+// --- 依頼の条件 ---
+
+test('条件はすべて名前と説明と効果を持つ', () => {
+  for (const [key, cond] of Object.entries(CONDITIONS)) {
+    assert.equal(cond.key, key);
+    assert.ok(cond.emoji && cond.label && cond.describe);
+    assert.ok(cond.rewardMul > 0 && cond.expMul > 0 && cond.pivotMul > 0);
+  }
+});
+
+test('知らない条件を聞かれても落ちない', () => {
+  assert.equal(findCondition('nothing'), null);
+  assert.equal(findCondition(null), null);
+});
+
+test('条件は一部の依頼にだけ付く（全部に付くと特別感が消える）', () => {
+  let withCond = 0;
+  let total = 0;
+  for (let seed = 1; seed <= 200; seed++) {
+    for (const offer of generateOffers(seed, 3).offers) {
+      total++;
+      if (offer.condition) withCond++;
+    }
+  }
+  const rate = withCond / total;
+  assert.ok(rate > 0.3 && rate < 0.8, `条件の出方が偏っている: ${(rate * 100).toFixed(0)}%`);
+});
+
+test('特急でも期間が0か月にはならない', () => {
+  for (let seed = 1; seed <= 200; seed++) {
+    for (const offer of generateOffers(seed, 3).offers) {
+      assert.ok(offer.months >= 1, `期間が ${offer.months} か月になっている`);
+    }
+  }
+});
+
+test('合格ラインを下回ると減額される', () => {
+  const cond = CONDITIONS.strict;
+  const sz = SIZES.medium;
+  const offer = {
+    client: 'X', genreId: 'gyomu', size: 'medium', months: sz.months,
+    reward: Math.round(sz.reward * cond.rewardMul), teamSize: sz.teamSize,
+    workCount: sz.workCount, condition: 'strict',
+  };
+  const staff = team('tanaka', 'sato', 'suzuki');
+
+  // 相性が最悪の組み合わせなら、合格ラインを割って減額されるはず
+  let rejected = 0;
+  for (let seed = 1; seed <= 40; seed++) {
+    let st = startProject({ genreId: 'gyomu', techId: 'ts', staff, workCount: sz.workCount, offer }, seed);
+    while (!st.done) st = work(st);
+    if (review(st).rejected) rejected++;
+  }
+  assert.ok(rejected > 30, `外しても減額されない: ${rejected}/40`);
+});
+
+test('条件なしの依頼は減額されない', () => {
+  const sz = SIZES.medium;
+  const offer = {
+    client: 'X', genreId: 'gyomu', size: 'medium', months: sz.months,
+    reward: sz.reward, teamSize: sz.teamSize, workCount: sz.workCount, condition: null,
+  };
+  const staff = team('tanaka', 'sato', 'suzuki');
+  let st = startProject({ genreId: 'gyomu', techId: 'ts', staff, workCount: sz.workCount, offer }, 3);
+  while (!st.done) st = work(st);
+  assert.equal(review(st).rejected, false);
+});
+
+test('きびしい客は、当てたときの実入りが条件なしより大きい', () => {
+  const sz = SIZES.medium;
+  const make = (condition, rewardMul) => ({
+    client: 'X', genreId: 'gyomu', size: 'medium', months: sz.months,
+    reward: Math.round(sz.reward * rewardMul), teamSize: sz.teamSize,
+    workCount: sz.workCount, condition,
+  });
+  const staff = team('tanaka', 'sato', 'suzuki');
+  const total = (offer) => {
+    let sum = 0;
+    for (let seed = 1; seed <= 40; seed++) {
+      let st = startProject({ genreId: 'gyomu', techId: 'java', staff, workCount: sz.workCount, offer }, seed);
+      while (!st.done) st = work(st);
+      sum += review(st).payout;
+    }
+    return sum;
+  };
+  assert.ok(total(make('strict', CONDITIONS.strict.rewardMul)) > total(make(null, 1)));
 });

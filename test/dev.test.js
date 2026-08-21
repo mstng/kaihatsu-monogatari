@@ -29,6 +29,8 @@ import {
   SIZES,
   CONDITIONS,
   findCondition,
+  TRAITS,
+  findTrait,
 } from '../src/dev.js';
 
 /** 社員の実体を作る。startProject は ID ではなく実体を受け取る（レベルとスキルを見るため） */
@@ -426,4 +428,78 @@ test('きびしい客は、当てたときの実入りが条件なしより大�
     return sum;
   };
   assert.ok(total(make('strict', CONDITIONS.strict.rewardMul)) > total(make(null, 1)));
+});
+
+// --- 性格 ---
+
+test('性格はすべて名前と説明と出方の幅を持つ', () => {
+  for (const [key, trait] of Object.entries(TRAITS)) {
+    assert.equal(trait.key, key);
+    assert.ok(trait.emoji && trait.label && trait.describe);
+    assert.ok(trait.range.min > 0 && trait.range.max >= trait.range.min);
+  }
+});
+
+test('知らない性格を聞かれても落ちない', () => {
+  assert.equal(findTrait('nothing'), null);
+  assert.equal(findTrait(null), null);
+});
+
+test('性格はブレ方を変えるが、強さの一軸には潰れない', () => {
+  // 平均が大きく離れると「強い性格・弱い性格」になり、選ぶ意味が消える
+  const averages = {};
+  const spreads = {};
+  for (const key of Object.keys(TRAITS)) {
+    const staff = { ...createStaff('tanaka'), trait: key };
+    let total = 0;
+    let count = 0;
+    let min = Infinity;
+    let max = 0;
+    for (let seed = 1; seed <= 60; seed++) {
+      let st = startProject({ ...SETUP, staff: [staff] }, seed);
+      while (!st.done) {
+        st = work(st);
+        total += st.lastWork.gain;
+        count++;
+        min = Math.min(min, st.lastWork.gain);
+        max = Math.max(max, st.lastWork.gain);
+      }
+    }
+    averages[key] = total / count;
+    spreads[key] = max - min;
+  }
+
+  const values = Object.values(averages);
+  assert.ok(Math.max(...values) < Math.min(...values) * 1.4, `平均が離れすぎ: ${JSON.stringify(averages)}`);
+  // きまじめは狭く、むらっ気は広い
+  assert.ok(spreads.steady < spreads.wild, `ブレ方が逆: ${JSON.stringify(spreads)}`);
+});
+
+test('つぶやきは出過ぎない', () => {
+  const staff = { ...createStaff('tanaka'), trait: 'steady' };
+  let count = 0;
+  let lines = 0;
+  for (let seed = 1; seed <= 60; seed++) {
+    let st = startProject({ ...SETUP, staff: [staff] }, seed);
+    while (!st.done) {
+      st = work(st);
+      count++;
+      if (st.lastWork.line) lines++;
+    }
+  }
+  const rate = lines / count;
+  assert.ok(rate > 0.05 && rate < 0.4, `つぶやきの頻度がおかしい: ${(rate * 100).toFixed(0)}%`);
+});
+
+test('性格を持たない社員でも落ちない', () => {
+  const staff = { ...createStaff('tanaka'), trait: undefined };
+  let st = startProject({ ...SETUP, staff: [staff] }, 3);
+  while (!st.done) st = work(st);
+  assert.ok(totalScore(st) > 0);
+});
+
+test('応募者には性格がつく', () => {
+  for (let seed = 1; seed <= 50; seed++) {
+    assert.ok(TRAITS[generateCandidate(seed, 0).trait], '知らない性格が振られている');
+  }
 });

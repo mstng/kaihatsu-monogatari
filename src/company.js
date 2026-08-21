@@ -219,6 +219,8 @@ export function createCompany(staffFactory, seed) {
     projects: 0,
     history: [],
     bankrupt: false,
+    // 買った設備。買い切りなので増える一方
+    facilities: [],
     // 年度のはじまりの控え。決算で差分を出すのに使う
     yearStart: {
       year: 1,
@@ -230,9 +232,16 @@ export function createCompany(staffFactory, seed) {
   };
 }
 
-/** 毎月かかる人件費 */
+/**
+ * 毎月かかる人件費。
+ * 設備（観葉植物）で少し下がる。固定費が減るのは効きが地味だが、
+ * 長く続けるほど積み上がるので、序盤に買う価値が出る。
+ *
+ * facilityEffects はこの下で定義しているが、呼ばれるのは実行時なので問題ない。
+ */
 export function monthlyCost(company) {
-  return company.staff.length * SALARY_PER_MONTH;
+  const base = company.staff.length * SALARY_PER_MONTH;
+  return Math.round(base * (facilityEffects(company).salaryMul ?? 1));
 }
 
 // --- 相性の記録 ---
@@ -321,6 +330,99 @@ export function settle(company, offer, payout) {
     profit: payout - cost,
     // 3月をまたいだかどうか。画面はこれを見て決算を出す
     yearEnded: settled.year > company.year,
+  };
+}
+
+// --- 設備 ---
+//
+// 資金の使い道が雇用しかないと、お金は「人を増やすためだけの数字」になる。
+// 買い切りで永続的に効くものを置くと、稼いだお金をどこに回すかの判断が生まれる。
+//
+// 効き方は雇用とわざとずらしてある。雇用は「できることが増える」（大型案件が受けられる）、
+// 設備は「同じことがうまくなる」。どちらを先に買うかで会社の育ち方が変わる。
+
+export const FACILITIES = [
+  {
+    id: 'chair',
+    name: 'いい椅子',
+    emoji: '🪑',
+    cost: 900,
+    describe: '出る数字が すこし増える',
+    effect: { gainMul: 1.12 },
+  },
+  {
+    id: 'coffee',
+    name: 'コーヒーメーカー',
+    emoji: '☕',
+    // 1400 では元を取るのに22件かかり、他の設備（7〜13件）と釣り合わなかった。
+    // 跳ねる回数が増えても、伸びるのは平均なので効きが地味だったため
+    cost: 800,
+    describe: 'ときどき大きく跳ねるようになる',
+    effect: { critBonus: 0.14 },
+  },
+  {
+    id: 'library',
+    name: '書架',
+    emoji: '📚',
+    cost: 2200,
+    describe: 'メンバーの経験値 +30%',
+    effect: { expMul: 1.3 },
+  },
+  {
+    id: 'monitor',
+    name: '大きいモニタ',
+    emoji: '🖥',
+    cost: 3000,
+    describe: '出る数字が さらに増える',
+    effect: { gainMul: 1.18 },
+  },
+  {
+    id: 'plant',
+    name: '観葉植物',
+    emoji: '🪴',
+    cost: 1100,
+    describe: '人件費が すこし安くなる',
+    effect: { salaryMul: 0.92 },
+  },
+];
+
+export function findFacility(id) {
+  return FACILITIES.find((f) => f.id === id);
+}
+
+/** 買った設備の効果を1つにまとめる */
+export function facilityEffects(company) {
+  const merged = { gainMul: 1, critBonus: 0, expMul: 1, salaryMul: 1 };
+  for (const id of company?.facilities ?? []) {
+    const facility = findFacility(id);
+    if (!facility) continue; // 知らないIDが混ざっても壊さない
+    const e = facility.effect;
+    merged.gainMul *= e.gainMul ?? 1;
+    merged.critBonus += e.critBonus ?? 0;
+    merged.expMul *= e.expMul ?? 1;
+    merged.salaryMul *= e.salaryMul ?? 1;
+  }
+  return merged;
+}
+
+export function hasFacility(company, id) {
+  return (company?.facilities ?? []).includes(id);
+}
+
+/** 買えるか。買ったあとに月給1か月ぶんが残ることまで見る */
+export function canBuyFacility(company, facility) {
+  if (!facility || company.bankrupt) return false;
+  if (hasFacility(company, facility.id)) return false;
+  return company.funds >= facility.cost + monthlyCost(company);
+}
+
+/** 設備を買う。買い切りなので、同じものは二度買えない */
+export function buyFacility(company, facility) {
+  if (!canBuyFacility(company, facility)) return company;
+  return {
+    ...company,
+    funds: company.funds - facility.cost,
+    facilities: [...(company.facilities ?? []), facility.id],
   };
 }
 

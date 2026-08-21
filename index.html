@@ -129,6 +129,20 @@
       #hud-funds.danger { color: var(--crit); }
       #hud-staff { font-size: 12px; color: var(--muted); }
 
+      /* 買った設備。オフィスに置いたものが並ぶ */
+      #facility-owned { font-size: 18px; letter-spacing: 4px; }
+
+      #mute {
+        background: var(--panel-hi);
+        border: 2px solid var(--line);
+        border-radius: 6px;
+        padding: 2px 7px;
+        font-size: 15px;
+        cursor: pointer;
+        line-height: 1.3;
+      }
+      #mute[aria-pressed='true'] { opacity: 0.45; }
+
       /* --- 依頼 --- */
       #offers { display: grid; gap: 6px; }
 
@@ -277,6 +291,37 @@
         border: 2px solid var(--line); border-radius: 99px;
       }
 
+      /* つぶやきの吹き出し。数字とは別の高さに出して、ぶつからないようにする */
+      .speech {
+        position: absolute;
+        transform: translateX(-50%);
+        background: var(--panel);
+        border: 2px solid var(--line);
+        border-radius: 10px;
+        padding: 3px 9px;
+        font-size: 12px;
+        white-space: nowrap;
+        pointer-events: none;
+        animation: speech-pop 1.9s ease-out forwards;
+      }
+
+      /* 吹き出しのしっぽ */
+      .speech::after {
+        content: '';
+        position: absolute;
+        left: 50%; bottom: -7px;
+        margin-left: -5px;
+        border: 5px solid transparent;
+        border-top-color: var(--line);
+      }
+
+      @keyframes speech-pop {
+        0%   { opacity: 0; transform: translateX(-50%) translateY(4px) scale(0.8); }
+        12%  { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+        80%  { opacity: 1; }
+        100% { opacity: 0; }
+      }
+
       /* 飛ぶ数字。これを気持ちよくするのが段階1の目的 */
       .pop {
         position: absolute;
@@ -423,6 +468,7 @@
         <span id="hud-date"></span>
         <span id="hud-staff"></span>
         <span id="hud-funds"></span>
+        <button id="mute" type="button" aria-label="音のオン・オフ">🔊</button>
       </div>
 
       <!-- ① 案件を決める -->
@@ -434,6 +480,11 @@
         <div class="panel" style="margin-top: 10px">
           <div class="label">なんの技術でつくる？</div>
           <div class="choices" id="tech-choices"></div>
+        </div>
+        <div class="panel" style="margin-top: 10px" id="facility-panel" hidden>
+          <div class="label" id="facility-label"></div>
+          <div class="choices" id="facility-choices"></div>
+          <div class="label" id="facility-owned" style="margin: 8px 0 0"></div>
         </div>
         <div class="panel" style="margin-top: 10px" id="hire-panel" hidden>
           <div class="label" id="hire-label"></div>

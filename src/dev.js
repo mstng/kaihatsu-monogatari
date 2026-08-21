@@ -138,6 +138,7 @@ export const STAFF_POOL = [
     emoji: '🧑‍💻',
     role: 'バックエンド',
     specialty: 'tech',
+    trait: 'craft',
     bias: { usability: 2, tech: 6, design: 1, stability: 3 },
   },
   {
@@ -146,6 +147,7 @@ export const STAFF_POOL = [
     emoji: '👩‍🎨',
     role: 'フロントエンド',
     specialty: 'design',
+    trait: 'bright',
     bias: { usability: 4, tech: 2, design: 6, stability: 1 },
   },
   {
@@ -154,6 +156,7 @@ export const STAFF_POOL = [
     emoji: '🧑‍🔧',
     role: 'インフラ',
     specialty: 'stability',
+    trait: 'steady',
     bias: { usability: 1, tech: 3, design: 1, stability: 6 },
   },
   {
@@ -162,6 +165,7 @@ export const STAFF_POOL = [
     emoji: '🧑‍💼',
     role: 'ディレクター',
     specialty: 'usability',
+    trait: 'wild',
     bias: { usability: 6, tech: 2, design: 3, stability: 2 },
   },
 ];
@@ -179,6 +183,73 @@ export function createStaff(id) {
 export function findStaff(id) {
   return STAFF_POOL.find((s) => s.id === id);
 }
+
+// --- 性格 ---
+//
+// レベルと素質だけだと、社員の違いが「強い／弱い」の一軸に潰れる。
+// 出方のクセを持たせると、同じ強さでも「使いどころが違う人」になる。
+//
+// 効果は1人ひとつだけ。複数を重ねると、何が効いているのか分からなくなる。
+
+export const TRAITS = {
+  steady: {
+    key: 'steady',
+    label: 'きまじめ',
+    emoji: '📐',
+    describe: '出る数字のブレが小さい',
+    range: { min: 4, max: 5 },
+  },
+  wild: {
+    key: 'wild',
+    label: 'むらっ気',
+    emoji: '🎲',
+    describe: '当たり外れが大きい',
+    range: { min: 1, max: 9 },
+  },
+  bright: {
+    key: 'bright',
+    label: 'ムードメーカー',
+    emoji: '☀️',
+    describe: 'ときどき大きく跳ねる',
+    range: { min: 3, max: 6 },
+    critBonus: 0.12,
+  },
+  craft: {
+    key: 'craft',
+    label: 'しょくにん',
+    emoji: '🔧',
+    describe: '得意分野がさらに伸びる',
+    range: { min: 3, max: 6 },
+    specialtyBonus: 0.35,
+  },
+};
+
+export function findTrait(key) {
+  return key ? (TRAITS[key] ?? null) : null;
+}
+
+/**
+ * 作業中のつぶやき。
+ *
+ * 眺めている時間に何も起きないと、ただ待っているだけになる。
+ * 性格ごとに言い回しを変えることで、数字以外でも「誰なのか」が伝わる。
+ */
+const LINES = {
+  steady: ['ここは ていねいに', 'テスト 書いておくか', 'あとで 困るからな'],
+  wild: ['いっちょ やるか！', 'なんとか なるって', 'うおー！'],
+  bright: ['いい感じ！', 'のってきた', 'みんな 元気？'],
+  craft: ['ここは 譲れない', 'うーん…', 'こだわりたい'],
+};
+
+/** 大きく跳ねたときだけ出る、共通のひとこと */
+const CRIT_LINES = ['きた！', 'ばっちり！', 'これだ！'];
+
+/**
+ * つぶやきが出る確率。多すぎるとうるさく、少なすぎると気づかれない。
+ * 0.16 では実測33%（大きく跳ねたときの掛け声と合算されるため）で、
+ * ほぼ毎回しゃべって落ち着かなかった。掛け声ぶんを見込んで下げてある。
+ */
+const SPEECH_CHANCE = 0.07;
 
 // --- 応募者 ---
 //
@@ -218,6 +289,9 @@ export function generateCandidate(seed, index = 0) {
   s = typeRoll.seed;
   const talentRoll = nextRandom(s);
   s = talentRoll.seed;
+  const traitKeys = Object.keys(TRAITS);
+  const traitRoll = randomInt(s, traitKeys.length);
+  s = traitRoll.seed;
 
   const archetype = ARCHETYPES[typeRoll.value];
   const talent =
@@ -232,6 +306,7 @@ export function generateCandidate(seed, index = 0) {
     role: archetype.role,
     specialty: archetype.specialty,
     bias: { ...archetype.bias },
+    trait: traitKeys[traitRoll.value],
     talent,
     level: 1,
     exp: 0,
@@ -389,7 +464,7 @@ export function generateOffers(seed, count = 3) {
  * 開発を開始した状態を作る。
  * 同じ種・同じ選択なら必ず同じ結果になる（やり直しで結果が変わらない）。
  */
-export function startProject({ genreId, techId, staff, workCount, offer }, seed) {
+export function startProject({ genreId, techId, staff, workCount, offer, facility }, seed) {
   return {
     seed: seed >>> 0,
     initialSeed: seed >>> 0,
@@ -399,6 +474,9 @@ export function startProject({ genreId, techId, staff, workCount, offer }, seed)
     workCount: workCount ?? WORK_COUNT,
     // どの依頼を受けたか。報酬の計算に使う
     offer: offer ?? null,
+    // 設備の効果。work() は会社を知らないので、始めるときに受け取っておく。
+    // ここで company を丸ごと渡すと、案件のルールが会社の都合に依存してしまう
+    facility: facility ?? { gainMul: 1, critBonus: 0 },
     // 社員は「実体」を受け取る。レベルやスキルを work() が見るため、
     // IDだけ渡す形だと成長が結果に反映されない
     staff: staff.map((s) => ({ ...s })),
@@ -451,11 +529,20 @@ export function work(state) {
   s = wobble.seed;
 
   const affinity = affinityOf(state.genreId, state.techId);
-  let gain = BASE_GAIN + Math.floor(wobble.value * 4) + skills.flatGain; // 3〜6 ＋スキル
-  if (staff.specialty === stat.key) gain = Math.round(gain * SPECIALTY_BONUS);
+  const trait = findTrait(staff.trait);
+
+  // 出る数字の幅は性格で決まる。きまじめは狭く、むらっ気は広い。
+  // 平均を動かすのではなく「ブレ方」を変えるので、強さの一軸に潰れない
+  const range = trait?.range ?? { min: BASE_GAIN, max: BASE_GAIN + 3 };
+  let gain = range.min + Math.floor(wobble.value * (range.max - range.min + 1)) + skills.flatGain;
+
+  if (staff.specialty === stat.key) {
+    gain = Math.round(gain * (SPECIALTY_BONUS + (trait?.specialtyBonus ?? 0)));
+  }
   // 素質。応募者ごとに違う。既存の創業メンバーは 1.0 として扱う
   gain = Math.round(gain * (staff.talent ?? 1));
   gain = Math.round(gain * levelMultiplier(staff));
+  gain = Math.round(gain * (state.facility?.gainMul ?? 1));
   gain = Math.round(gain * AFFINITY_BONUS[affinity]);
 
   // 相性が良いほど、大きい数字が出る回数が増える。
@@ -465,8 +552,21 @@ export function work(state) {
   // 合計が振り切れた。good にも出して、跳ね幅自体は控えめにしてある。
   // スキル「深夜のひらめき」は、相性に関係なく跳ねる目を足す
   const baseCrit = affinity === 'great' || affinity === 'good' ? 0.2 : 0;
-  const critical = wobble.value > 1 - (baseCrit + skills.critChance);
+  const critical =
+    wobble.value >
+    1 - (baseCrit + skills.critChance + (trait?.critBonus ?? 0) + (state.facility?.critBonus ?? 0));
   if (critical) gain = Math.round(gain * 1.5);
+
+  // つぶやき。眺めている時間に何も起きないと、ただ待っているだけになる
+  const speechRoll = nextRandom(s);
+  s = speechRoll.seed;
+  let line = null;
+  if (critical) {
+    line = CRIT_LINES[Math.floor(speechRoll.value * CRIT_LINES.length)];
+  } else if (speechRoll.value < SPEECH_CHANCE) {
+    const pool = LINES[staff.trait] ?? LINES.steady;
+    line = pool[Math.floor((speechRoll.value / SPEECH_CHANCE) * pool.length) % pool.length];
+  }
 
   const worked = state.worked + 1;
 
@@ -480,7 +580,7 @@ export function work(state) {
       [staff.id]: (state.contribution[staff.id] ?? 0) + gain,
     },
     worked,
-    lastWork: { staffId: staff.id, statKey: stat.key, gain, critical },
+    lastWork: { staffId: staff.id, statKey: stat.key, gain, critical, line },
     done: worked >= state.workCount,
   };
 }

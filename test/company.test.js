@@ -211,6 +211,12 @@ import {
   snapshotYear,
   yearSummary,
   closeYear,
+  FACILITIES,
+  findFacility,
+  facilityEffects,
+  hasFacility,
+  canBuyFacility,
+  buyFacility,
 } from '../src/company.js';
 
 const newCompany = (seed = 1) => createCompany(createStaff, seed);
@@ -445,4 +451,78 @@ test('年度を締めると基準が置き直され、翌年の集計に前年�
   assert.equal(closed.yearStart.year, 2);
   assert.equal(closed.yearStart.funds, 5000);
   assert.equal(yearSummary(closed).count, 0);
+});
+
+// --- 設備 ---
+
+test('設備はすべて名前と価格と効果を持つ', () => {
+  for (const facility of FACILITIES) {
+    assert.ok(facility.id && facility.name && facility.emoji && facility.describe);
+    assert.ok(facility.cost > 0);
+    assert.ok(Object.keys(facility.effect).length > 0, `${facility.name} に効果がない`);
+  }
+  const ids = FACILITIES.map((f) => f.id);
+  assert.equal(new Set(ids).size, ids.length, 'IDが重複している');
+});
+
+test('何も買っていなければ効果はすべて素通し', () => {
+  const effects = facilityEffects(newCompany());
+  assert.equal(effects.gainMul, 1);
+  assert.equal(effects.critBonus, 0);
+  assert.equal(effects.expMul, 1);
+  assert.equal(effects.salaryMul, 1);
+});
+
+test('知らない設備IDが混ざっても壊れない', () => {
+  const effects = facilityEffects({ facilities: ['nope', 'chair'] });
+  assert.equal(effects.gainMul, findFacility('chair').effect.gainMul);
+});
+
+test('買うと資金が減り、設備が増える', () => {
+  const company = newCompany();
+  const chair = findFacility('chair');
+  const after = buyFacility(company, chair);
+  assert.equal(after.funds, company.funds - chair.cost);
+  assert.equal(hasFacility(after, 'chair'), true);
+});
+
+test('同じ設備は二度買えない（買い切り）', () => {
+  const once = buyFacility(newCompany(), findFacility('chair'));
+  const twice = buyFacility(once, findFacility('chair'));
+  assert.equal(twice.funds, once.funds);
+  assert.equal(twice.facilities.length, 1);
+});
+
+test('資金が足りなければ買えない', () => {
+  const poor = { ...newCompany(), funds: 100 };
+  const monitor = findFacility('monitor');
+  assert.equal(canBuyFacility(poor, monitor), false);
+  assert.equal(buyFacility(poor, monitor).facilities?.length ?? 0, 0);
+});
+
+test('倒産していたら買えない', () => {
+  assert.equal(canBuyFacility({ ...newCompany(), bankrupt: true }, findFacility('chair')), false);
+});
+
+test('観葉植物を置くと人件費が下がる', () => {
+  const company = newCompany();
+  const before = monthlyCost(company);
+  const after = monthlyCost(buyFacility(company, findFacility('plant')));
+  assert.ok(after < before, `人件費が下がっていない: ${before} → ${after}`);
+});
+
+test('設備の効果は重ねて掛かる', () => {
+  let company = newCompany();
+  company = buyFacility({ ...company, funds: 99999 }, findFacility('chair'));
+  company = buyFacility(company, findFacility('monitor'));
+  const effects = facilityEffects(company);
+  const expected = findFacility('chair').effect.gainMul * findFacility('monitor').effect.gainMul;
+  assert.ok(Math.abs(effects.gainMul - expected) < 1e-9);
+});
+
+test('元の会社は書き換わらない（イミュータブル）', () => {
+  const company = newCompany();
+  const snapshot = JSON.stringify(company);
+  buyFacility(company, findFacility('chair'));
+  assert.equal(JSON.stringify(company), snapshot);
 });

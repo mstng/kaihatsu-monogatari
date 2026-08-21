@@ -24,7 +24,20 @@ import {
   generateCandidate,
   talentStars,
   findCondition,
+  findTrait,
 } from './dev.js';
+import {
+  playWork,
+  playCritical,
+  playTap,
+  playComplete,
+  playLevelUp,
+  playCoin,
+  playBad,
+  playYearEnd,
+  isMuted,
+  setMuted,
+} from './sound.js';
 import {
   grow,
   expToNext,
@@ -34,6 +47,11 @@ import {
   hireCost,
   remember,
   recalledAffinity,
+  FACILITIES,
+  facilityEffects,
+  hasFacility,
+  canBuyFacility,
+  buyFacility,
   createCompany,
   monthlyCost,
   dateLabel,
@@ -62,9 +80,10 @@ const AFFINITY_MARK = { great: '◎', good: '○', normal: '△', bad: '✕' };
 
 const el = {};
 for (const id of [
-  'hud-date', 'hud-staff', 'hud-funds',
+  'hud-date', 'hud-staff', 'hud-funds', 'mute',
   'setup', 'offers', 'tech-choices', 'staff-choices', 'staff-label',
   'hire-panel', 'hire-label', 'hire-choices', 'start',
+  'facility-panel', 'facility-label', 'facility-choices', 'facility-owned',
   'develop', 'stage', 'progress-bar', 'stats',
   'result', 'result-headline', 'result-sales', 'reviews', 'affinity-hint',
   'settle', 'growth', 'again',
@@ -231,6 +250,16 @@ function renderSetup() {
     level.textContent = `Lv.${staff.level}`;
     button.appendChild(level);
 
+    // 性格は「誰を入れるか」の判断材料になるので、選ぶ場所に出す
+    const trait = findTrait(staff.trait);
+    if (trait) {
+      const mark = document.createElement('span');
+      mark.className = 'choice-sub';
+      mark.textContent = `${trait.emoji}${trait.label}`;
+      mark.title = trait.describe;
+      button.appendChild(mark);
+    }
+
     if (staff.skills.length > 0) {
       const skills = document.createElement('span');
       skills.className = 'choice-skills';
@@ -246,10 +275,53 @@ function renderSetup() {
     ? `だれにやってもらう？（${picked.staffIds.length} / ${offer.teamSize}人）`
     : 'まず依頼をえらんでください';
 
+  renderFacilities();
   renderHire();
 
   el.start.disabled = !offer || !picked.techId || picked.staffIds.length !== offer.teamSize;
   el.start.textContent = offer ? `つくりはじめる（${offer.months}か月）` : 'つくりはじめる';
+}
+
+/**
+ * 設備。買い切りで永続的に効く、資金のもう一つの使い道。
+ * 雇用が「できることが増える」のに対し、設備は「同じことがうまくなる」。
+ */
+function renderFacilities() {
+  const remaining = FACILITIES.filter((f) => !hasFacility(company, f.id));
+
+  el['facility-owned'].textContent = (company.facilities ?? [])
+    .map((id) => FACILITIES.find((f) => f.id === id)?.emoji ?? '')
+    .join('');
+
+  if (remaining.length === 0) {
+    el['facility-label'].textContent = 'オフィスに置けるものは すべて揃った';
+    el['facility-choices'].innerHTML = '';
+    el['facility-panel'].hidden = false;
+    return;
+  }
+
+  el['facility-panel'].hidden = false;
+  el['facility-label'].textContent = 'オフィスに何か置く？（買い切り）';
+  el['facility-choices'].innerHTML = '';
+
+  for (const facility of remaining) {
+    const affordable = canBuyFacility(company, facility);
+    const button = choiceButton(facility.emoji, facility.name, facility.describe, false, () => {
+      if (!affordable) return;
+      playTap();
+      company = buyFacility(company, facility);
+      save();
+      renderSetup();
+    });
+    button.disabled = !affordable;
+
+    const price = document.createElement('span');
+    price.className = 'choice-level';
+    price.textContent = `${facility.cost}万`;
+    button.appendChild(price);
+
+    el['facility-choices'].appendChild(button);
+  }
 }
 
 function renderHire() {
@@ -274,6 +346,15 @@ function renderHire() {
       renderSetup();
     });
     button.disabled = !affordable;
+
+    const trait = findTrait(candidate.trait);
+    if (trait) {
+      const mark = document.createElement('span');
+      mark.className = 'choice-sub';
+      mark.textContent = `${trait.emoji}${trait.label}`;
+      mark.title = trait.describe;
+      button.appendChild(mark);
+    }
 
     // 素質は数値ではなく★で見せる。ひと目で比べられるほうが選びやすい
     const stars = document.createElement('span');
@@ -366,6 +447,17 @@ function popNumber(entry) {
   el.stage.appendChild(pop);
   pop.addEventListener('animationend', () => pop.remove());
 
+  // つぶやきは数字より上に出す。同じ高さだと重なって読めない
+  if (entry.line) {
+    const speech = document.createElement('div');
+    speech.className = 'speech';
+    speech.style.left = `${desk.left}%`;
+    speech.style.bottom = '134px';
+    speech.textContent = entry.line;
+    el.stage.appendChild(speech);
+    speech.addEventListener('animationend', () => speech.remove());
+  }
+
   const value = document.getElementById(`stat-${entry.statKey}`);
   if (value) {
     value.textContent = String(state.stats[entry.statKey]);
@@ -382,7 +474,14 @@ function startDevelopment() {
   // ID ではなく実体を渡す。育ったレベルとスキルを work() が見るため
   const staff = picked.staffIds.map((id) => company.staff.find((s) => s.id === id));
   state = startProject(
-    { genreId: offer.genreId, techId: picked.techId, staff, workCount: offer.workCount, offer },
+    {
+      genreId: offer.genreId,
+      techId: picked.techId,
+      staff,
+      workCount: offer.workCount,
+      offer,
+      facility: facilityEffects(company),
+    },
     seed,
   );
 
@@ -396,13 +495,18 @@ function startDevelopment() {
 
   timer = setInterval(() => {
     state = work(state);
-    if (state.lastWork) popNumber(state.lastWork);
+    if (state.lastWork) {
+      popNumber(state.lastWork);
+      if (state.lastWork.critical) playCritical();
+      else playWork();
+    }
     el['progress-bar'].style.width = `${progress(state) * 100}%`;
 
     if (state.done) {
       clearInterval(timer);
       timer = null;
       for (const desk of deskOf.values()) desk.emoji.classList.remove('working');
+      playComplete();
       setTimeout(showResult, FINISH_DELAY_MS);
     }
   }, WORK_INTERVAL_MS);
@@ -444,6 +548,9 @@ function showResult() {
 
   el.develop.hidden = true;
   el.result.hidden = false;
+  // 減額されたときだけ下がる音にする。聞いただけで悪い知らせだと分かる
+  if (result.rejected) playBad();
+  else playCoin();
   save();
 }
 
@@ -503,7 +610,8 @@ function applySettlement(offer, payout, rejected = false) {
 function applyGrowth() {
   // 育成枠なら経験値が増える。報酬を捨てて人を育てた見返りがここに出る
   const condition = findCondition(state.offer?.condition);
-  const result = grow(company.staff, state.contribution, company.seed, condition?.expMul ?? 1);
+  const expMul = (condition?.expMul ?? 1) * facilityEffects(company).expMul;
+  const result = grow(company.staff, state.contribution, company.seed, expMul);
   company = { ...company, staff: result.staff, seed: result.seed };
 
   const byStaff = new Map();
@@ -520,6 +628,8 @@ function applyGrowth() {
   for (const [staffId, entry] of byStaff) {
     const staff = company.staff.find((s) => s.id === staffId);
     const leveledUp = entry.levels.length > 0;
+    // 出てくるタイミングに合わせて鳴らす。まとめて鳴らすと1回に聞こえる
+    if (leveledUp) setTimeout(playLevelUp, index * 120 + 200);
 
     const row = document.createElement('div');
     row.className = `grow-row${leveledUp ? ' levelup' : ''}`;
@@ -629,6 +739,8 @@ function showYearEnd() {
     }
   }
 
+  playYearEnd();
+
   el.result.hidden = true;
   el.yearend.hidden = false;
 }
@@ -660,6 +772,25 @@ function nextProject() {
   renderSetup();
 }
 
+/** 音のオン・オフ。設定を覚えておかないと、毎回消し直すことになる */
+const MUTE_KEY = 'kaihatsu:muted';
+
+function renderMute() {
+  el.mute.textContent = isMuted() ? '🔇' : '🔊';
+  el.mute.setAttribute('aria-pressed', String(isMuted()));
+}
+
+el.mute.addEventListener('click', () => {
+  setMuted(!isMuted());
+  try {
+    localStorage.setItem(MUTE_KEY, isMuted() ? '1' : '0');
+  } catch {
+    // 覚えられなくても、その場では効いている
+  }
+  renderMute();
+  if (!isMuted()) playTap();
+});
+
 el['yearend-next'].addEventListener('click', () => {
   company = withOffers(company);
   picked = { offerId: null, techId: null, staffIds: [] };
@@ -669,8 +800,14 @@ el['yearend-next'].addEventListener('click', () => {
   renderSetup();
 });
 
-el.start.addEventListener('click', startDevelopment);
-el.again.addEventListener('click', nextProject);
+el.start.addEventListener('click', () => {
+  playTap();
+  startDevelopment();
+});
+el.again.addEventListener('click', () => {
+  playTap();
+  nextProject();
+});
 el.restart.addEventListener('click', () => {
   if (timer) clearInterval(timer);
   timer = null;
@@ -686,6 +823,13 @@ el.restart.addEventListener('click', () => {
 });
 
 // --- 起動 ---
+
+try {
+  setMuted(localStorage.getItem(MUTE_KEY) === '1');
+} catch {
+  // 読めなくても既定（音あり）で始まる
+}
+renderMute();
 
 company = load();
 renderSetup();
